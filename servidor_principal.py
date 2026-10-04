@@ -1,50 +1,30 @@
 # -*- coding: utf-8 -*-
 """
-Servidor combinado para Render: recibe tanto los webhooks de WhatsApp (Meta)
-como los de Stripe, en un único proceso.
+Servidor único para Render: une el webhook de WhatsApp (completo, conectado
+a la IA/OneDrive/base de datos), el webhook de Stripe, y el panel web de
+cada gestoría -- los tres en un solo proceso, mediante Blueprints de Flask.
 """
 
 import os
-import hashlib
-import hmac
 import logging
 
 import stripe
-from flask import Flask, request, abort
+from flask import Flask, request
 
 from basededatos import activar_suscripcion, desactivar_suscripcion, resolver_tenant_por_stripe_customer_id
+from webhook_whatsapp import bp_whatsapp
+from panel_web import bp_panel
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("servidor_principal")
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "cambia-esto-en-produccion")
+
+app.register_blueprint(bp_whatsapp)
+app.register_blueprint(bp_panel)
 
 
-# ---------------------------------------------------------------------------
-# WhatsApp (versión de prueba: solo confirma que los mensajes llegan bien)
-# ---------------------------------------------------------------------------
-@app.route("/webhook/whatsapp", methods=["GET"])
-def whatsapp_verificar():
-    if (request.args.get("hub.mode") == "subscribe"
-            and request.args.get("hub.verify_token") == os.environ["WHATSAPP_VERIFY_TOKEN"]):
-        return request.args.get("hub.challenge"), 200
-    return "Verificación fallida", 403
-
-
-@app.route("/webhook/whatsapp", methods=["POST"])
-def whatsapp_recibir():
-    firma = request.headers.get("X-Hub-Signature-256", "")
-    secreto = os.environ["WHATSAPP_APP_SECRET"].encode()
-    esperado = "sha256=" + hmac.new(secreto, request.get_data(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(esperado, firma):
-        abort(403)
-    log.info("Mensaje recibido de WhatsApp: %s", request.get_json(force=True))
-    return "OK", 200
-
-
-# ---------------------------------------------------------------------------
-# Stripe
-# ---------------------------------------------------------------------------
 @app.route("/webhook/stripe", methods=["POST"])
 def stripe_webhook():
     stripe.api_key = os.environ["STRIPE_SECRET_KEY"]

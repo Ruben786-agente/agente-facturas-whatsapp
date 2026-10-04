@@ -1,39 +1,23 @@
 # -*- coding: utf-8 -*-
 """
 Capa de acceso a la base de datos central (Postgres en producción).
-
-Implementa exactamente las funciones que sondeo_periodico.py espera:
-    - obtener_tenants_activos()
-    - obtener_facturas_ya_registradas(tenant_id, cif_empresa_cliente)
-    - guardar_factura_procesada(...)          (nuevo -- para registrar en la caché)
-    - actualizar_ultima_revision(...)          (nuevo -- para no releer lo mismo)
-    - purgar_cache_antigua(dias=60)            (mantenimiento periódico)
-
-Usa DATABASE_URL de entorno, p.ej.:
-    postgresql+psycopg2://usuario:password@host:5432/nombre_bd   (producción)
-    sqlite:///local_prueba.db                                     (pruebas locales, sin Postgres)
-
-El cifrado del refresh_token se hace aquí con Fernet (cryptography), usando
-una clave FERNET_KEY de entorno -- nunca se guarda el refresh_token en claro.
 """
 
 import os
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
-    create_engine, Column, String, Boolean, DateTime, Numeric, Date, LargeBinary, ForeignKey, select, delete
+    create_engine, Column, String, Boolean, DateTime, Numeric, Date, LargeBinary, ForeignKey
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 import uuid
 from cryptography.fernet import Fernet
+from werkzeug.security import generate_password_hash, check_password_hash
 
 Base = declarative_base()
 
 
 def _uuid_column(**kwargs):
-    # UUID nativo en Postgres; en SQLite (pruebas locales) se guarda como
-    # texto de 36 caracteres -- mismo valor, sin perder compatibilidad.
     return Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()), **kwargs)
 
 
@@ -42,6 +26,7 @@ class Gestoria(Base):
     tenant_id = _uuid_column()
     nombre = Column(String, nullable=False)
     email_contacto = Column(String, nullable=False)
+    password_hash = Column(String)
     plan_suscripcion = Column(String, nullable=False, default="trial")
     trial_expira_en = Column(DateTime(timezone=True))
     stripe_customer_id = Column(String)
@@ -108,12 +93,9 @@ class FacturaCache(Base):
     proveedor_nombre = Column(String)
     total_factura = Column(Numeric(12, 2), nullable=False)
     destino = Column(String, nullable=False)
+    motivo = Column(String)  # por qué está en Revisión, si aplica
     procesada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-
-# ---------------------------------------------------------------------------
-# Conexión
-# ---------------------------------------------------------------------------
 
 _engine = None
 _Session = None
@@ -130,7 +112,7 @@ def _obtener_session():
 
 
 def _fernet():
-    clave = os.environ["FERNET_KEY"]  # generar una vez con Fernet.generate_key() y guardarla como secreto
+    clave = os.environ["FERNET_KEY"]
     return Fernet(clave.encode() if isinstance(clave, str) else clave)
 
 
@@ -142,16 +124,45 @@ def descifrar_refresh_token(token_cifrado: bytes) -> str:
     return _fernet().decrypt(token_cifrado).decode()
 
 
+def _como_aware_utc(momento):
+    if momento is not None and momento.tzinfo is None:
+        return momento.replace(tzinfo=timezone.utc)
+    return momento
+
+
 # ---------------------------------------------------------------------------
-# Funciones que sondeo_periodico.py necesita
+# Login de la gestoría (panel web)
+# ---------------------------------------------------------------------------
+
+def establecer_password(tenant_id, password_en_claro):
+    session = _obtener_session()
+    try:
+        g = session.get(Gestoria, tenant_id)
+        g.password_hash = generate_password_hash(password_en_claro)
+        session.commit()
+    finally:
+        session.close()
+
+
+def verificar_login(email, password_en_claro):
+    """Devuelve tenant_id si el email+contraseña son correctos, None si no."""
+    session = _obtener_session()
+    try:
+        g = session.query(Gestoria).filter_by(email_contacto=email).first()
+        if not g or not g.password_hash:
+            return None
+        if check_password_hash(g.password_hash, password_en_claro):
+            return g.tenant_id
+        return None
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# Tenants / empresas-cliente / sondeo
 # ---------------------------------------------------------------------------
 
 def obtener_tenants_activos():
-    """
-    Devuelve una lista de dicts, uno por CADA EMPRESA-CLIENTE activa (no por
-    gestoría -- sondeo_periodico.py itera por empresa-cliente, que es la
-    unidad real de "una carpeta a vigilar").
-    """
     session = _obtener_session()
     try:
         filas = (
@@ -178,7 +189,7 @@ def obtener_tenants_activos():
                 "carpeta_revision_id": empresa.carpeta_revision_id,
                 "carpeta_excel_id": empresa.carpeta_excel_id,
                 "ultima_revision_iso": estado.ultima_revision.isoformat() if estado and estado.ultima_revision else None,
-                "_empresa_cliente_id": empresa.id,  # uso interno para actualizar_ultima_revision
+                "_empresa_cliente_id": empresa.id,
             })
         return resultado
     finally:
@@ -186,27 +197,16 @@ def obtener_tenants_activos():
 
 
 def obtener_facturas_ya_registradas(tenant_id, cif_empresa_cliente):
-    """
-    Devuelve las facturas en caché de esta empresa-cliente, en el formato que
-    espera detector_duplicados.buscar_posible_duplicado.
-    """
     session = _obtener_session()
     try:
-        empresa = (
-            session.query(EmpresaCliente)
-            .filter_by(tenant_id=tenant_id, cif_nif=cif_empresa_cliente)
-            .first()
-        )
+        empresa = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=cif_empresa_cliente).first()
         if not empresa:
             return []
-
         filas = session.query(FacturaCache).filter_by(empresa_cliente_id=empresa.id).all()
         return [
             {
-                "tenant_id": tenant_id,
-                "cif_empresa_cliente": cif_empresa_cliente,
-                "num_factura": f.num_factura,
-                "fecha_factura": f.fecha_factura.strftime("%d/%m/%Y"),
+                "tenant_id": tenant_id, "cif_empresa_cliente": cif_empresa_cliente,
+                "num_factura": f.num_factura, "fecha_factura": f.fecha_factura.strftime("%d/%m/%Y"),
                 "emisor": {"cif_nif": f.proveedor_cif or "", "nombre": f.proveedor_nombre or ""},
                 "total_factura": float(f.total_factura),
             }
@@ -217,24 +217,17 @@ def obtener_facturas_ya_registradas(tenant_id, cif_empresa_cliente):
 
 
 def guardar_factura_procesada(tenant_id, cif_empresa_cliente, tipo_documento, num_factura,
-                                fecha_factura, proveedor_cif, proveedor_nombre, total_factura, destino):
-    """Registra una factura/ticket en la caché, tras procesarla (para futuras comprobaciones de duplicado)."""
-    from datetime import datetime as dt
+                                fecha_factura, proveedor_cif, proveedor_nombre, total_factura, destino, motivo=None):
     session = _obtener_session()
     try:
-        empresa = (
-            session.query(EmpresaCliente)
-            .filter_by(tenant_id=tenant_id, cif_nif=cif_empresa_cliente)
-            .first()
-        )
+        empresa = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=cif_empresa_cliente).first()
         if not empresa:
             raise ValueError(f"Empresa-cliente {cif_empresa_cliente} no encontrada para tenant {tenant_id}")
-
         entrada = FacturaCache(
             tenant_id=tenant_id, empresa_cliente_id=empresa.id, tipo_documento=tipo_documento,
-            num_factura=num_factura, fecha_factura=dt.strptime(fecha_factura, "%d/%m/%Y").date(),
+            num_factura=num_factura, fecha_factura=datetime.strptime(fecha_factura, "%d/%m/%Y").date(),
             proveedor_cif=proveedor_cif, proveedor_nombre=proveedor_nombre,
-            total_factura=total_factura, destino=destino,
+            total_factura=total_factura, destino=destino, motivo=motivo,
         )
         session.add(entrada)
         session.commit()
@@ -256,57 +249,36 @@ def actualizar_ultima_revision(empresa_cliente_id, momento=None):
         session.close()
 
 
-def obtener_refresh_token_onedrive(tenant_id):
-    """Usado por el webhook de WhatsApp: necesita el OneDrive de la gestoría para poder subir el archivo."""
+def purgar_cache_antigua(dias=60):
     session = _obtener_session()
     try:
-        cred = (
-            session.query(CredencialAlmacenamiento)
-            .filter_by(tenant_id=tenant_id, proveedor="onedrive")
-            .first()
-        )
-        return descifrar_refresh_token(cred.refresh_token_cifrado) if cred else None
+        limite = datetime.now(timezone.utc) - timedelta(days=dias)
+        borradas = session.query(FacturaCache).filter(FacturaCache.procesada_en < limite).delete()
+        session.commit()
+        return borradas
     finally:
         session.close()
 
 
+# ---------------------------------------------------------------------------
+# WhatsApp
+# ---------------------------------------------------------------------------
+
 def resolver_tenant_por_phone_number_id(phone_number_id):
-    """
-    Usado por el webhook de WhatsApp: dado el phone_number_id que manda Meta
-    en cada notificación, devuelve el tenant_id y el access_token (para poder
-    llamar a la API de Media y descargar la imagen/PDF adjunto).
-    Devuelve None si el número no está registrado o está desactivado.
-    """
     session = _obtener_session()
     try:
-        numero = (
-            session.query(NumeroWhatsapp)
-            .filter_by(phone_number_id=phone_number_id, activo=True)
-            .first()
-        )
+        numero = session.query(NumeroWhatsapp).filter_by(phone_number_id=phone_number_id, activo=True).first()
         if not numero:
             return None
-        return {
-            "tenant_id": numero.tenant_id,
-            "access_token": descifrar_refresh_token(numero.access_token_cifrado),
-        }
+        return {"tenant_id": numero.tenant_id, "access_token": descifrar_refresh_token(numero.access_token_cifrado)}
     finally:
         session.close()
 
 
 def resolver_empresa_cliente_por_cif(tenant_id, cifs_candidatos):
-    """
-    Usado tras extraer una factura de WhatsApp (canal mezclado, sin carpeta
-    dedicada): busca, dentro de las empresas-cliente de ESTE tenant, cuál
-    tiene alguno de los CIFs candidatos (típicamente [cif_emisor, cif_destinatario]).
-    Devuelve el dict de la empresa-cliente (con sus carpetas) o None si
-    ninguno coincide -- en ese caso, el documento va a carpeta_sin_identificar_id
-    de la gestoría, no a un cliente concreto.
-    """
     cifs_candidatos = [c.strip().upper() for c in cifs_candidatos if c]
     if not cifs_candidatos:
         return None
-
     session = _obtener_session()
     try:
         empresa = (
@@ -319,10 +291,8 @@ def resolver_empresa_cliente_por_cif(tenant_id, cifs_candidatos):
             return None
         return {
             "id": empresa.id, "cif_nif": empresa.cif_nif, "nombre": empresa.nombre,
-            "carpeta_facturas_id": empresa.carpeta_facturas_id,
-            "carpeta_tickets_id": empresa.carpeta_tickets_id,
-            "carpeta_revision_id": empresa.carpeta_revision_id,
-            "carpeta_excel_id": empresa.carpeta_excel_id,
+            "carpeta_facturas_id": empresa.carpeta_facturas_id, "carpeta_tickets_id": empresa.carpeta_tickets_id,
+            "carpeta_revision_id": empresa.carpeta_revision_id, "carpeta_excel_id": empresa.carpeta_excel_id,
         }
     finally:
         session.close()
@@ -331,20 +301,31 @@ def resolver_empresa_cliente_por_cif(tenant_id, cifs_candidatos):
 def obtener_carpeta_sin_identificar(tenant_id):
     session = _obtener_session()
     try:
-        gestoria = session.get(Gestoria, tenant_id)
-        return gestoria.carpeta_sin_identificar_id if gestoria else None
+        g = session.get(Gestoria, tenant_id)
+        return g.carpeta_sin_identificar_id if g else None
     finally:
         session.close()
 
 
+def obtener_refresh_token_onedrive(tenant_id):
+    session = _obtener_session()
+    try:
+        cred = session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id, proveedor="onedrive").first()
+        return descifrar_refresh_token(cred.refresh_token_cifrado) if cred else None
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# Suscripción / prueba gratuita
+# ---------------------------------------------------------------------------
+
 def crear_gestoria_prueba(nombre, email_contacto, dias_prueba=14):
-    """Alta de una gestoría nueva en modo prueba, sin pasar por Stripe."""
     session = _obtener_session()
     try:
         gestoria = Gestoria(
             nombre=nombre, email_contacto=email_contacto, plan_suscripcion="trial",
-            trial_expira_en=datetime.now(timezone.utc) + timedelta(days=dias_prueba),
-            activa=True,
+            trial_expira_en=datetime.now(timezone.utc) + timedelta(days=dias_prueba), activa=True,
         )
         session.add(gestoria)
         session.commit()
@@ -353,15 +334,7 @@ def crear_gestoria_prueba(nombre, email_contacto, dias_prueba=14):
         session.close()
 
 
-def _como_aware_utc(momento):
-    """SQLite (solo en pruebas locales) devuelve datetimes sin zona horaria; Postgres sí la conserva."""
-    if momento is not None and momento.tzinfo is None:
-        return momento.replace(tzinfo=timezone.utc)
-    return momento
-
-
 def tenant_tiene_acceso(tenant_id):
-    """True si puede seguir usando el sistema: paga, o está dentro de su prueba."""
     session = _obtener_session()
     try:
         g = session.get(Gestoria, tenant_id)
@@ -377,18 +350,10 @@ def tenant_tiene_acceso(tenant_id):
 
 
 def expirar_pruebas_caducadas():
-    """
-    Mantenimiento periódico (ejecutar, p.ej., una vez al día): corta el acceso
-    a las gestorías cuya prueba gratuita ha terminado sin haber contratado.
-    """
     session = _obtener_session()
     try:
         ahora = datetime.now(timezone.utc)
-        caducadas = (
-            session.query(Gestoria)
-            .filter(Gestoria.plan_suscripcion == "trial", Gestoria.trial_expira_en < ahora)
-            .all()
-        )
+        caducadas = session.query(Gestoria).filter(Gestoria.plan_suscripcion == "trial", Gestoria.trial_expira_en < ahora).all()
         for g in caducadas:
             g.plan_suscripcion = "prueba_caducada"
             g.activa = False
@@ -401,11 +366,11 @@ def expirar_pruebas_caducadas():
 def activar_suscripcion(tenant_id, stripe_customer_id, stripe_subscription_id):
     session = _obtener_session()
     try:
-        gestoria = session.get(Gestoria, tenant_id)
-        gestoria.stripe_customer_id = stripe_customer_id
-        gestoria.stripe_subscription_id = stripe_subscription_id
-        gestoria.plan_suscripcion = "activo"
-        gestoria.activa = True
+        g = session.get(Gestoria, tenant_id)
+        g.stripe_customer_id = stripe_customer_id
+        g.stripe_subscription_id = stripe_subscription_id
+        g.plan_suscripcion = "activo"
+        g.activa = True
         session.commit()
     finally:
         session.close()
@@ -414,9 +379,9 @@ def activar_suscripcion(tenant_id, stripe_customer_id, stripe_subscription_id):
 def desactivar_suscripcion(tenant_id):
     session = _obtener_session()
     try:
-        gestoria = session.get(Gestoria, tenant_id)
-        gestoria.plan_suscripcion = "cancelado"
-        gestoria.activa = False
+        g = session.get(Gestoria, tenant_id)
+        g.plan_suscripcion = "cancelado"
+        g.activa = False
         session.commit()
     finally:
         session.close()
@@ -431,18 +396,34 @@ def resolver_tenant_por_stripe_customer_id(stripe_customer_id):
         session.close()
 
 
-def purgar_cache_antigua(dias=60):
+# ---------------------------------------------------------------------------
+# Panel web: resumen y pendientes
+# ---------------------------------------------------------------------------
+
+def obtener_resumen_panel(tenant_id):
     """
-    Mantenimiento periódico (ejecutar p.ej. una vez a la semana): borra de la
-    caché las facturas más antiguas que 'dias'. Pasado ese tiempo ya no tiene
-    sentido comparar contra ellas para detectar duplicados -- el dato
-    definitivo ya vive en el Excel de la gestoría, no aquí.
+    Para el panel de la gestoría: cuántas facturas hay en cada estado, y el
+    detalle de las que necesitan atención (Tickets, Revisión, Sin identificar).
     """
     session = _obtener_session()
     try:
-        limite = datetime.now(timezone.utc) - timedelta(days=dias)
-        borradas = session.query(FacturaCache).filter(FacturaCache.procesada_en < limite).delete()
-        session.commit()
-        return borradas
+        filas = (
+            session.query(FacturaCache, EmpresaCliente.nombre)
+            .join(EmpresaCliente, FacturaCache.empresa_cliente_id == EmpresaCliente.id)
+            .filter(FacturaCache.tenant_id == tenant_id)
+            .order_by(FacturaCache.procesada_en.desc())
+            .all()
+        )
+        resumen = {"PROCESADA": 0, "TICKETS": 0, "REVISION": 0}
+        pendientes = []
+        for f, nombre_empresa in filas:
+            resumen[f.destino] = resumen.get(f.destino, 0) + 1
+            if f.destino in ("TICKETS", "REVISION"):
+                pendientes.append({
+                    "empresa": nombre_empresa, "fecha": f.fecha_factura.strftime("%d/%m/%Y"),
+                    "proveedor": f.proveedor_nombre or "(desconocido)", "total": float(f.total_factura),
+                    "destino": f.destino, "motivo": f.motivo,
+                })
+        return {"resumen": resumen, "pendientes": pendientes[:50]}
     finally:
         session.close()
