@@ -7,3 +7,4 @@ stripe
 requests
 anthropic
 msal
+openpyxl
