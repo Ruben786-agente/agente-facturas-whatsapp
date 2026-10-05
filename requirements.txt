@@ -2,6 +2,7 @@ flask
 gunicorn
 sqlalchemy
 psycopg2-binary
+psycopg[binary]
 cryptography
 stripe
 requests
