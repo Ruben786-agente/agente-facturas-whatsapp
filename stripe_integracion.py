@@ -42,7 +42,6 @@ def crear_sesion_pago(tenant_id, email_gestoria, url_exito, url_cancelacion):
     _configurar()
     sesion = stripe.checkout.Session.create(
         mode="subscription",
-        payment_method_types=["card"],
         line_items=[{"price": os.environ["STRIPE_PRICE_ID"], "quantity": 1}],
         customer_email=email_gestoria,
         client_reference_id=str(tenant_id),
