@@ -1,4 +1,15 @@
 # -*- coding: utf-8 -*-
+"""
+Lectura de facturas con IA (Claude con visión). Una sola llamada por documento.
+
+El prompt y el esquema de salida viven dentro de este archivo (antes se leían
+de un .md y el esquema nunca llegaba a enviarse al modelo).
+
+Variables de entorno:
+    ANTHROPIC_API_KEY    -- clave de la API de Claude
+    MODELO_EXTRACCION    -- opcional; por defecto claude-sonnet-5-5
+"""
+
 import base64
 import json
 import logging
@@ -8,13 +19,57 @@ import re
 import anthropic
 
 log = logging.getLogger("extraccion_ia")
-MODELO = "claude-sonnet-4-5"
+
+MODELO = os.environ.get("MODELO_EXTRACCION", "claude-sonnet-5-5")
+
+PROMPT = """Eres un extractor de datos de facturas y tickets españoles para uso contable.
+Analiza el documento adjunto (imagen o PDF) y devuelve ÚNICAMENTE un JSON válido con
+exactamente la estructura de abajo. Sin explicaciones, sin markdown, sin texto fuera del JSON.
+
+ESTRUCTURA (todos los campos son obligatorios):
+{
+  "es_documento_fiscal": true,
+  "fecha_factura": "DD/MM/AAAA",
+  "num_factura": "texto",
+  "emisor": {"cif_nif": "", "nombre": "", "domicilio": "", "localidad": "", "cp": ""},
+  "destinatario": {"cif_nif": "", "nombre": ""},
+  "desgloses": [
+    {"base": 0.0, "pct_iva": 0.0, "cuota_iva": 0.0,
+     "pct_recargo": null, "cuota_recargo": null,
+     "pct_retencion": null, "cuota_retencion": null}
+  ],
+  "total_factura": 0.0,
+  "confianza": "alta",
+  "es_factura_simplificada": false,
+  "sin_cif_destinatario": false,
+  "formato_ticket_tpv": false
+}
+
+REGLAS:
+1. es_documento_fiscal: true si es una factura, factura simplificada, ticket de compra o abono
+   (factura rectificativa). false si es otra cosa: albarán, presupuesto, pedido, contrato,
+   publicidad, firma de correo, foto sin factura, documento ilegible o en blanco. Si dudas
+   entre factura y otra cosa, pon true y baja la confianza. Si es false, el resto de campos
+   puede ir vacío ("" o 0).
+2. CIF/NIF: mayúsculas y sin espacios, puntos ni guiones. Si no aparece con claridad, "".
+   Nunca inventes un CIF.
+3. num_factura: siempre texto, conservando ceros a la izquierda, guiones y barras.
+4. Fechas: siempre DD/MM/AAAA.
+5. desgloses: un elemento por cada tipo de IVA distinto (agrupa por porcentaje, no por línea
+   de producto, sumando las bases). Importes negativos en abonos.
+6. Retención de IRPF o recargo de equivalencia: solo si aparecen impresos; si no, null.
+7. emisor es quien emite la factura (proveedor); destinatario es el cliente. Distínguelos con
+   cuidado: de ello depende a qué empresa se asigna el documento.
+8. total_factura: el total impreso en el documento, no recalculado.
+9. es_factura_simplificada: true si pone "factura simplificada" o equivalente.
+   sin_cif_destinatario: true si en ningún sitio aparece el NIF/CIF del comprador.
+   formato_ticket_tpv: true si parece un recibo de datáfono/TPV y no una factura formal.
+10. confianza: "alta" si todo se lee con claridad; "media" si algún dato secundario es dudoso;
+    "baja" si el CIF, los importes o el total no se leen con seguridad, o si la suma de bases
+    y cuotas no coincide con el total.
+"""
+
 _RUTA_AQUI = os.path.dirname(os.path.abspath(__file__))
-
-
-def _cargar_prompt():
-    with open(os.path.join(_RUTA_AQUI, "prompt_extraccion.md"), encoding="utf-8") as f:
-        return f.read()
 
 
 def _detectar_media_type(contenido: bytes) -> str:
@@ -36,8 +91,11 @@ def _extraer_json(texto: str) -> dict:
 
 
 def _respuesta_por_defecto(motivo: str) -> dict:
+    """Si algo falla nunca se frena el proceso: confianza 'baja' y es_documento_fiscal True,
+    para que el documento llegue a una carpeta de revisión y no se pierda."""
     log.warning("Extracción con IA no fiable (%s) -- se envía a revisión manual", motivo)
     return {
+        "es_documento_fiscal": True,
         "fecha_factura": "", "num_factura": "",
         "emisor": {"cif_nif": "", "nombre": ""}, "destinatario": {"cif_nif": "", "nombre": ""},
         "desgloses": [{"base": 0, "pct_iva": 0, "cuota_iva": 0, "pct_recargo": None,
@@ -49,30 +107,37 @@ def _respuesta_por_defecto(motivo: str) -> dict:
 
 def extraer_factura(contenido: bytes) -> dict:
     media_type = _detectar_media_type(contenido)
+    datos_b64 = base64.b64encode(contenido).decode()
     if media_type == "application/pdf":
-        bloque_documento = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
-                                                             "data": base64.b64encode(contenido).decode()}}
+        bloque = {"type": "document", "source": {"type": "base64", "media_type": media_type, "data": datos_b64}}
     else:
-        bloque_documento = {"type": "image", "source": {"type": "base64", "media_type": media_type,
-                                                          "data": base64.b64encode(contenido).decode()}}
+        bloque = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": datos_b64}}
+
     try:
         cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         respuesta = cliente.messages.create(
-            model=MODELO, max_tokens=1500, system=_cargar_prompt(),
+            model=MODELO, max_tokens=1500, system=PROMPT,
             messages=[{"role": "user", "content": [
-                bloque_documento, {"type": "text", "text": "Extrae los datos de esta factura según las instrucciones."},
+                bloque, {"type": "text", "text": "Extrae los datos de este documento según las instrucciones."},
             ]}],
         )
-        texto = "".join(bloque.text for bloque in respuesta.content if bloque.type == "text")
+        texto = "".join(b.text for b in respuesta.content if b.type == "text")
         datos = _extraer_json(texto)
-        campos_obligatorios = ["fecha_factura", "num_factura", "emisor", "destinatario", "desgloses", "total_factura"]
-        if not all(c in datos for c in campos_obligatorios):
+
+        if datos.get("es_documento_fiscal") is False:
+            return {**_respuesta_por_defecto("no es un documento fiscal"), "es_documento_fiscal": False}
+
+        obligatorios = ["fecha_factura", "num_factura", "emisor", "destinatario", "desgloses", "total_factura"]
+        if not all(c in datos for c in obligatorios):
             return _respuesta_por_defecto("faltan campos obligatorios en la respuesta")
+
+        datos.setdefault("es_documento_fiscal", True)
         datos.setdefault("confianza", "baja")
         datos.setdefault("es_factura_simplificada", False)
-        datos.setdefault("sin_cif_destinatario", not datos.get("destinatario", {}).get("cif_nif"))
+        datos.setdefault("sin_cif_destinatario", not (datos.get("destinatario") or {}).get("cif_nif"))
         datos.setdefault("formato_ticket_tpv", False)
         return datos
+
     except json.JSONDecodeError:
         return _respuesta_por_defecto("la IA no devolvió un JSON válido")
     except anthropic.APIError as e:

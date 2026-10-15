@@ -27,6 +27,10 @@ class AlmacenamientoDocumentos(ABC):
     def buscar_archivo_por_nombre(self, carpeta_id, nombre): ...
     @abstractmethod
     def crear_suscripcion_cambios(self, carpeta_id, url_webhook): ...
+    @abstractmethod
+    def crear_carpeta(self, carpeta_padre_id, nombre): ...
+    @abstractmethod
+    def crear_enlace_subida(self, carpeta_id): ...
 
 
 class OneDriveStorage(AlmacenamientoDocumentos):
@@ -89,6 +93,42 @@ class OneDriveStorage(AlmacenamientoDocumentos):
         item = resp.json()
         return ArchivoRemoto(id=item["id"], nombre=item["name"], carpeta_id=carpeta_id,
                               tamano_bytes=item["size"], fecha_modificacion=item["lastModifiedDateTime"])
+
+    def crear_carpeta(self, carpeta_padre_id, nombre):
+        """
+        Crea una carpeta dentro de otra y devuelve su id. Es idempotente: si ya
+        existe una con ese nombre, devuelve el id de la existente en vez de
+        fallar (así repetir el alta no duplica carpetas).
+        carpeta_padre_id puede ser "root" para crearla en la raíz del OneDrive.
+        """
+        url = f"{self._drive_prefix()}/items/{carpeta_padre_id}/children"
+        body = {"name": nombre, "folder": {}, "@microsoft.graph.conflictBehavior": "fail"}
+        resp = requests.post(url, headers=self._headers(), json=body)
+        if resp.status_code == 409:  # ya existe -> la buscamos
+            existente = requests.get(
+                f"{self._drive_prefix()}/items/{carpeta_padre_id}:/{nombre}", headers=self._headers()
+            )
+            existente.raise_for_status()
+            return existente.json()["id"]
+        resp.raise_for_status()
+        return resp.json()["id"]
+
+    def crear_enlace_subida(self, carpeta_id):
+        """
+        Enlace con el que otra persona (el cliente de la gestoría) puede subir
+        archivos a esa carpeta sin tener cuenta. Devuelve None si no se puede:
+        algunas empresas bloquean los enlaces anónimos por política de
+        seguridad de Microsoft 365.
+        """
+        try:
+            resp = requests.post(
+                f"{self._drive_prefix()}/items/{carpeta_id}/createLink",
+                headers=self._headers(), json={"type": "edit", "scope": "anonymous"},
+            )
+            resp.raise_for_status()
+            return resp.json()["link"]["webUrl"]
+        except Exception:
+            return None
 
     def crear_suscripcion_cambios(self, carpeta_id, url_webhook):
         import datetime

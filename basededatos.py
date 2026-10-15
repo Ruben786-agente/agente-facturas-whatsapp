@@ -7,7 +7,8 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
-    create_engine, Column, String, Boolean, DateTime, Numeric, Date, LargeBinary, ForeignKey
+    create_engine, Column, String, Boolean, DateTime, Numeric, Date, LargeBinary, ForeignKey,
+    BigInteger, UniqueConstraint
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import uuid
@@ -97,6 +98,23 @@ class FacturaCache(Base):
     procesada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class CorreoProcesado(Base):
+    __tablename__ = "correos_procesados"
+    __table_args__ = (UniqueConstraint("tenant_id", "mensaje_id", name="uq_correo_tenant_mensaje"),)
+    id = _uuid_column()
+    tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), nullable=False)
+    mensaje_id = Column(String, nullable=False)
+    procesado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class EstadoCorreo(Base):
+    __tablename__ = "estado_correo"
+    tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), primary_key=True)
+    ultimo_mensaje_ts = Column(BigInteger)
+    error = Column(String)
+    actualizado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 _engine = None
 _Session = None
 
@@ -168,7 +186,7 @@ def obtener_tenants_activos():
         filas = (
             session.query(EmpresaCliente, Gestoria, CredencialAlmacenamiento, EstadoSondeo)
             .join(Gestoria, EmpresaCliente.tenant_id == Gestoria.tenant_id)
-            .join(CredencialAlmacenamiento, CredencialAlmacenamiento.tenant_id == Gestoria.tenant_id)
+            .join(CredencialAlmacenamiento, (CredencialAlmacenamiento.tenant_id == Gestoria.tenant_id) & (CredencialAlmacenamiento.proveedor == "onedrive"))
             .outerjoin(EstadoSondeo, EstadoSondeo.empresa_cliente_id == EmpresaCliente.id)
             .filter(
                 EmpresaCliente.activa == True, Gestoria.activa == True,  # noqa: E712
@@ -208,7 +226,7 @@ def obtener_facturas_ya_registradas(tenant_id, cif_empresa_cliente):
                 "tenant_id": tenant_id, "cif_empresa_cliente": cif_empresa_cliente,
                 "num_factura": f.num_factura, "fecha_factura": f.fecha_factura.strftime("%d/%m/%Y"),
                 "emisor": {"cif_nif": f.proveedor_cif or "", "nombre": f.proveedor_nombre or ""},
-                "total_factura": float(f.total_factura),
+                "total_factura": float(f.total_factura), "destino": f.destino,
             }
             for f in filas
         ]
@@ -307,11 +325,133 @@ def obtener_carpeta_sin_identificar(tenant_id):
         session.close()
 
 
-def obtener_refresh_token_onedrive(tenant_id):
+def registrar_empresa_cliente(tenant_id, cif_nif, nombre, carpetas):
+    """
+    Da de alta una empresa-cliente con los ids de sus carpetas en OneDrive.
+    carpetas: dict con raiz, facturas, tickets, revision y excel.
+    Es idempotente: si ya existe esa empresa (mismo tenant y CIF) la devuelve
+    tal cual, sin duplicarla.
+    """
+    cif_nif = cif_nif.strip().upper()
     session = _obtener_session()
     try:
-        cred = session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id, proveedor="onedrive").first()
+        existente = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=cif_nif).first()
+        if existente:
+            return existente.id
+        empresa = EmpresaCliente(
+            tenant_id=tenant_id, cif_nif=cif_nif, nombre=nombre.strip(),
+            carpeta_raiz_id=carpetas["raiz"], carpeta_facturas_id=carpetas["facturas"],
+            carpeta_tickets_id=carpetas["tickets"], carpeta_revision_id=carpetas["revision"],
+            carpeta_excel_id=carpetas["excel"],
+        )
+        session.add(empresa)
+        session.commit()
+        return empresa.id
+    finally:
+        session.close()
+
+
+def guardar_carpeta_sin_identificar(tenant_id, carpeta_id):
+    session = _obtener_session()
+    try:
+        g = session.get(Gestoria, tenant_id)
+        g.carpeta_sin_identificar_id = carpeta_id
+        session.commit()
+    finally:
+        session.close()
+
+
+def obtener_refresh_token(tenant_id, proveedor):
+    session = _obtener_session()
+    try:
+        cred = session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id, proveedor=proveedor).first()
         return descifrar_refresh_token(cred.refresh_token_cifrado) if cred else None
+    finally:
+        session.close()
+
+
+def obtener_refresh_token_onedrive(tenant_id):
+    return obtener_refresh_token(tenant_id, "onedrive")
+
+
+def guardar_credencial(tenant_id, proveedor, refresh_token, cuenta=None):
+    """Guarda (o reemplaza) el acceso cifrado de una gestoría a OneDrive o Gmail."""
+    session = _obtener_session()
+    try:
+        cred = session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id, proveedor=proveedor).first()
+        if cred is None:
+            cred = CredencialAlmacenamiento(tenant_id=tenant_id, proveedor=proveedor)
+            session.add(cred)
+        cred.refresh_token_cifrado = cifrar_refresh_token(refresh_token)
+        cred.cuenta_conectada = cuenta
+        cred.conectada_en = datetime.now(timezone.utc)
+        session.commit()
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# Canal de correo (Gmail)
+# ---------------------------------------------------------------------------
+
+def tenants_con_correo():
+    """Gestorías con acceso vigente que tienen Gmail Y OneDrive conectados."""
+    session = _obtener_session()
+    try:
+        ahora = datetime.now(timezone.utc)
+        resultado = []
+        for g in session.query(Gestoria).filter(Gestoria.activa == True).all():  # noqa: E712
+            vigente = g.plan_suscripcion == "activo" or (
+                g.plan_suscripcion == "trial" and g.trial_expira_en and _como_aware_utc(g.trial_expira_en) > ahora)
+            if not vigente:
+                continue
+            provs = {c.proveedor for c in session.query(CredencialAlmacenamiento).filter_by(tenant_id=g.tenant_id)}
+            if {"gmail", "onedrive"} <= provs:
+                resultado.append(g.tenant_id)
+        return resultado
+    finally:
+        session.close()
+
+
+def obtener_estado_correo(tenant_id):
+    session = _obtener_session()
+    try:
+        e = session.get(EstadoCorreo, tenant_id)
+        return {"ultimo_mensaje_ts": e.ultimo_mensaje_ts if e else None, "error": e.error if e else None}
+    finally:
+        session.close()
+
+
+def guardar_estado_correo(tenant_id, ultimo_mensaje_ts=None, error=None):
+    session = _obtener_session()
+    try:
+        e = session.get(EstadoCorreo, tenant_id)
+        if e is None:
+            e = EstadoCorreo(tenant_id=tenant_id)
+            session.add(e)
+        if ultimo_mensaje_ts is not None:
+            e.ultimo_mensaje_ts = ultimo_mensaje_ts
+        e.error = error
+        e.actualizado_en = datetime.now(timezone.utc)
+        session.commit()
+    finally:
+        session.close()
+
+
+def correo_ya_procesado(tenant_id, mensaje_id):
+    session = _obtener_session()
+    try:
+        return session.query(CorreoProcesado).filter_by(tenant_id=tenant_id, mensaje_id=mensaje_id).first() is not None
+    finally:
+        session.close()
+
+
+def marcar_correo_procesado(tenant_id, mensaje_id):
+    session = _obtener_session()
+    try:
+        if not session.query(CorreoProcesado).filter_by(tenant_id=tenant_id, mensaje_id=mensaje_id).first():
+            session.add(CorreoProcesado(tenant_id=tenant_id, mensaje_id=mensaje_id))
+            session.commit()
     finally:
         session.close()
 
@@ -425,5 +565,37 @@ def obtener_resumen_panel(tenant_id):
                     "destino": f.destino, "motivo": f.motivo,
                 })
         return {"resumen": resumen, "pendientes": pendientes[:50]}
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# Alta pública y estado de conexiones
+# ---------------------------------------------------------------------------
+
+def existe_email_gestoria(email):
+    session = _obtener_session()
+    try:
+        return session.query(Gestoria).filter_by(email_contacto=email).first() is not None
+    finally:
+        session.close()
+
+
+def obtener_estado_conexiones(tenant_id):
+    """Qué tiene conectado la gestoría y si hay algún aviso que mostrar en el panel."""
+    session = _obtener_session()
+    try:
+        g = session.get(Gestoria, tenant_id)
+        provs = {c.proveedor: c.cuenta_conectada for c in session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id)}
+        estado_correo = session.get(EstadoCorreo, tenant_id)
+        return {
+            "nombre": g.nombre,
+            "plan": g.plan_suscripcion,
+            "trial_expira_en": _como_aware_utc(g.trial_expira_en) if g.trial_expira_en else None,
+            "email": g.email_contacto,
+            "onedrive": "onedrive" in provs, "onedrive_cuenta": provs.get("onedrive"),
+            "gmail": "gmail" in provs, "gmail_cuenta": provs.get("gmail"),
+            "gmail_error": estado_correo.error if estado_correo else None,
+        }
     finally:
         session.close()

@@ -10,7 +10,7 @@ from functools import wraps
 
 from flask import Blueprint, request, redirect, session, render_template_string, url_for
 
-from basededatos import verificar_login, obtener_resumen_panel
+from basededatos import verificar_login, obtener_resumen_panel, obtener_estado_conexiones
 
 bp_panel = Blueprint("panel", __name__)
 
@@ -68,6 +68,8 @@ PLANTILLA_PANEL = """
 </style></head><body>
   <a class="salir" href="{{ url_for('panel.logout') }}">Cerrar sesión</a>
   <h1>Panel de facturas</h1>
+  {% if aviso %}<p style="background:#fff4e5;padding:10px;border-radius:4px;">⚠ {{ aviso }} <a href="{{ url_for('alta.conexiones') }}">Resolver</a></p>{% endif %}
+  <p><a href="{{ url_for('alta.conexiones') }}">Conexiones y suscripción</a></p>
   <div class="resumen">
     <div class="tarjeta ok"><div class="numero">{{ resumen.PROCESADA }}</div>Procesadas</div>
     <div class="tarjeta tickets"><div class="numero">{{ resumen.TICKETS }}</div>Tickets</div>
@@ -114,7 +116,9 @@ def logout():
 @login_requerido
 def panel():
     datos = obtener_resumen_panel(session["tenant_id"])
-    return render_template_string(PLANTILLA_PANEL, resumen=datos["resumen"], pendientes=datos["pendientes"])
+    e = obtener_estado_conexiones(session["tenant_id"])
+    aviso = e["gmail_error"] or (None if e["onedrive"] else "Falta conectar OneDrive.")
+    return render_template_string(PLANTILLA_PANEL, resumen=datos["resumen"], pendientes=datos["pendientes"], aviso=aviso)
 
 
 
