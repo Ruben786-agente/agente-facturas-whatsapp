@@ -189,10 +189,10 @@ def callback_gmail():
 @bp_alta.route("/suscribirme")
 @login_requerido
 def suscribirme():
-    from stripe_integracion import crear_sesion_pago
-    e = obtener_estado_conexiones(session["tenant_id"])
     base = request.url_root.rstrip("/")
     try:
+        from stripe_integracion import crear_sesion_pago
+        e = obtener_estado_conexiones(session["tenant_id"])
         url = crear_sesion_pago(session["tenant_id"], e["email"],
                                 base + url_for("alta.conexiones", ok="¡Gracias! Tu suscripción se activará en unos segundos."),
                                 base + url_for("alta.conexiones"))
