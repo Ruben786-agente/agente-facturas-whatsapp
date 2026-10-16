@@ -15,6 +15,7 @@ from basededatos import activar_suscripcion, desactivar_suscripcion, resolver_te
 from webhook_whatsapp import bp_whatsapp
 from panel_web import bp_panel
 from alta_web import bp_alta
+from tareas_web import bp_tareas
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("servidor_principal")
@@ -25,6 +26,7 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "cambia-esto-en-produccion")
 app.register_blueprint(bp_whatsapp)
 app.register_blueprint(bp_panel)
 app.register_blueprint(bp_alta)
+app.register_blueprint(bp_tareas)
 
 
 @app.route("/webhook/stripe", methods=["POST"])
