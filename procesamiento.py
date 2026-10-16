@@ -25,7 +25,7 @@ import requests
 from datetime import datetime
 
 from basededatos import (
-    crear_aviso,
+    crear_aviso, registrar_sin_identificar,
     guardar_factura_procesada, obtener_carpeta_sin_identificar,
     obtener_facturas_ya_registradas, resolver_empresa_cliente_por_cif,
 )
@@ -98,6 +98,7 @@ def _sin_identificar(storage, tenant_id, nombre, contenido, motivo):
         preparar_gestoria(storage, tenant_id)
         carpeta = obtener_carpeta_sin_identificar(tenant_id)
     storage.subir_archivo(carpeta, nombre_archivo_destino(nombre, "REVISION", motivo), contenido)
+    registrar_sin_identificar(tenant_id, nombre, motivo)
     return {"accion": "sin_identificar", "motivo": motivo}
 
 

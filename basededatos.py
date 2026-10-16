@@ -115,6 +115,15 @@ class EstadoCorreo(Base):
     actualizado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class DocumentoSinIdentificar(Base):
+    __tablename__ = "documentos_sin_identificar"
+    id = _uuid_column()
+    tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), nullable=False)
+    nombre_archivo = Column(String, nullable=False)
+    motivo = Column(String)
+    registrado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class Aviso(Base):
     __tablename__ = "avisos"
     id = _uuid_column()
@@ -567,7 +576,7 @@ def obtener_resumen_panel(tenant_id):
             .order_by(FacturaCache.procesada_en.desc())
             .all()
         )
-        resumen = {"PROCESADA": 0, "TICKETS": 0, "REVISION": 0}
+        resumen = {"PROCESADA": 0, "TICKETS": 0, "REVISION": 0, "SIN_IDENTIFICAR": 0}
         pendientes = []
         for f, nombre_empresa in filas:
             resumen[f.destino] = resumen.get(f.destino, 0) + 1
@@ -577,6 +586,14 @@ def obtener_resumen_panel(tenant_id):
                     "proveedor": f.proveedor_nombre or "(desconocido)", "total": float(f.total_factura),
                     "destino": f.destino, "motivo": f.motivo,
                 })
+        sin_id = (session.query(DocumentoSinIdentificar).filter_by(tenant_id=tenant_id)
+                  .order_by(DocumentoSinIdentificar.registrado_en.desc()).all())
+        resumen["SIN_IDENTIFICAR"] = len(sin_id)
+        for d in sin_id:
+            pendientes.append({
+                "empresa": "(sin identificar)", "fecha": _como_aware_utc(d.registrado_en).strftime("%d/%m/%Y"),
+                "proveedor": d.nombre_archivo, "total": None, "destino": "SIN_IDENTIFICAR", "motivo": d.motivo,
+            })
         return {"resumen": resumen, "pendientes": pendientes[:50]}
     finally:
         session.close()
@@ -663,6 +680,16 @@ def marcar_avisos_vistos(tenant_id):
     session = _obtener_session()
     try:
         session.query(Aviso).filter_by(tenant_id=tenant_id, visto=False).update({"visto": True})
+        session.commit()
+    finally:
+        session.close()
+
+
+def registrar_sin_identificar(tenant_id, nombre_archivo, motivo):
+    """Anota un documento que ha ido a la carpeta «Sin identificar», para que salga en el panel."""
+    session = _obtener_session()
+    try:
+        session.add(DocumentoSinIdentificar(tenant_id=tenant_id, nombre_archivo=nombre_archivo, motivo=motivo))
         session.commit()
     finally:
         session.close()

@@ -59,12 +59,14 @@ PLANTILLA_PANEL = """
   .tarjeta.ok .numero { color: #27ae60; }
   .tarjeta.tickets .numero { color: #e67e22; }
   .tarjeta.revision .numero { color: #c0392b; }
+  .tarjeta.sinid .numero { color: #8e44ad; }
   table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; }
   th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid #eee; font-size: 0.92em; }
   th { background: #fafafa; }
   .etiqueta { padding: 2px 8px; border-radius: 10px; font-size: 0.8em; color: white; }
   .etiqueta.TICKETS { background: #e67e22; }
   .etiqueta.REVISION { background: #c0392b; }
+  .etiqueta.SIN_IDENTIFICAR { background: #8e44ad; }
   a.salir { float: right; color: #888; text-decoration: none; }
 </style></head><body>
   <a class="salir" href="{{ url_for('panel.logout') }}">Cerrar sesión</a>
@@ -81,6 +83,7 @@ PLANTILLA_PANEL = """
     <div class="tarjeta ok"><div class="numero">{{ resumen.PROCESADA }}</div>Procesadas</div>
     <div class="tarjeta tickets"><div class="numero">{{ resumen.TICKETS }}</div>Tickets</div>
     <div class="tarjeta revision"><div class="numero">{{ resumen.REVISION }}</div>En revisión</div>
+    <div class="tarjeta sinid"><div class="numero">{{ resumen.SIN_IDENTIFICAR }}</div>Sin identificar</div>
   </div>
   <h2>Pendientes de atención</h2>
   {% if pendientes %}
@@ -89,8 +92,8 @@ PLANTILLA_PANEL = """
     {% for p in pendientes %}
     <tr>
       <td>{{ p.empresa }}</td><td>{{ p.fecha }}</td><td>{{ p.proveedor }}</td>
-      <td>{{ "%.2f"|format(p.total) }} €</td>
-      <td><span class="etiqueta {{ p.destino }}">{{ p.destino }}</span></td>
+      <td>{% if p.total is not none %}{{ "%.2f"|format(p.total) }} €{% else %}-{% endif %}</td>
+      <td><span class="etiqueta {{ p.destino }}">{{ p.destino.replace("_", " ") }}</span></td>
       <td>{{ p.motivo or "-" }}</td>
     </tr>
     {% endfor %}
