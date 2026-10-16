@@ -25,6 +25,7 @@ import requests
 from datetime import datetime
 
 from basededatos import (
+    crear_aviso,
     guardar_factura_procesada, obtener_carpeta_sin_identificar,
     obtener_facturas_ya_registradas, resolver_empresa_cliente_por_cif,
 )
@@ -197,6 +198,14 @@ def procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=N
         empresa = resolver_empresa_cliente_por_cif(tenant_id, [cif]) if cif else None
         if empresa:
             reparar_empresa(storage, tenant_id, empresa["nombre"], empresa["cif_nif"])
+            donde = f"la carpeta de {empresa['nombre']} ({empresa['cif_nif']})"
+        else:
+            donde = "una carpeta de Agente Facturas (por ejemplo «Sin identificar»)"
+        crear_aviso(
+            tenant_id, "carpeta_recreada",
+            f"Faltaba {donde} en OneDrive: se borró o se movió. El agente la ha vuelto a crear. "
+            "Lo que había dentro no se recupera solo: puedes buscarlo en la papelera de OneDrive.",
+        )
         return _archivar(storage, tenant_id, contenido, nombre_original, factura)
 
 

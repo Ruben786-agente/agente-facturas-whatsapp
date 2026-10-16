@@ -10,7 +10,7 @@ from functools import wraps
 
 from flask import Blueprint, request, redirect, session, render_template_string, url_for
 
-from basededatos import verificar_login, obtener_resumen_panel, obtener_estado_conexiones
+from basededatos import verificar_login, obtener_resumen_panel, obtener_estado_conexiones, obtener_avisos, marcar_avisos_vistos
 
 bp_panel = Blueprint("panel", __name__)
 
@@ -69,6 +69,12 @@ PLANTILLA_PANEL = """
 </style></head><body>
   <a class="salir" href="{{ url_for('panel.logout') }}">Cerrar sesión</a>
   <h1>Panel de facturas</h1>
+  {% if avisos %}
+  <div style="background:#fdecea;padding:10px 14px;border-radius:4px;margin-bottom:1rem;">
+    {% for a in avisos %}<p style="margin:6px 0;">⚠ {{ a.mensaje }} <small style="color:#888;">({{ a.creado_en.strftime("%d/%m/%Y %H:%M") }})</small></p>{% endfor %}
+    <form method="post" action="{{ url_for('panel.avisos_vistos') }}"><button type="submit">Entendido</button></form>
+  </div>
+  {% endif %}
   {% if aviso %}<p style="background:#fff4e5;padding:10px;border-radius:4px;">⚠ {{ aviso }} <a href="{{ url_for('alta.conexiones') }}">Resolver</a></p>{% endif %}
   <p><a href="{{ url_for('alta.conexiones') }}">Conexiones y suscripción</a></p>
   <div class="resumen">
@@ -119,7 +125,15 @@ def panel():
     datos = obtener_resumen_panel(session["tenant_id"])
     e = obtener_estado_conexiones(session["tenant_id"])
     aviso = e["gmail_error"] or (None if e["onedrive"] else "Falta conectar OneDrive.")
-    return render_template_string(PLANTILLA_PANEL, resumen=datos["resumen"], pendientes=datos["pendientes"], aviso=aviso)
+    return render_template_string(PLANTILLA_PANEL, resumen=datos["resumen"], pendientes=datos["pendientes"], aviso=aviso,
+                                  avisos=obtener_avisos(session["tenant_id"]))
 
 
 
+
+
+@bp_panel.route("/avisos/vistos", methods=["POST"])
+@login_requerido
+def avisos_vistos():
+    marcar_avisos_vistos(session["tenant_id"])
+    return redirect(url_for("panel.panel"))

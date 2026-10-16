@@ -115,6 +115,16 @@ class EstadoCorreo(Base):
     actualizado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class Aviso(Base):
+    __tablename__ = "avisos"
+    id = _uuid_column()
+    tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), nullable=False)
+    tipo = Column(String, nullable=False)
+    mensaje = Column(String, nullable=False)
+    visto = Column(Boolean, nullable=False, default=False)
+    creado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 _engine = None
 _Session = None
 
@@ -619,5 +629,40 @@ def actualizar_carpetas_empresa(tenant_id, cif_nif, carpetas):
         e.carpeta_excel_id = carpetas["excel"]
         session.commit()
         return True
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# Avisos para la gestoría (se muestran en el panel hasta que los marca como vistos)
+# ---------------------------------------------------------------------------
+
+def crear_aviso(tenant_id, tipo, mensaje):
+    """No repite un aviso idéntico que siga sin ver."""
+    session = _obtener_session()
+    try:
+        if session.query(Aviso).filter_by(tenant_id=tenant_id, tipo=tipo, mensaje=mensaje, visto=False).first():
+            return False
+        session.add(Aviso(tenant_id=tenant_id, tipo=tipo, mensaje=mensaje))
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def obtener_avisos(tenant_id):
+    session = _obtener_session()
+    try:
+        filas = session.query(Aviso).filter_by(tenant_id=tenant_id, visto=False).order_by(Aviso.creado_en.desc()).limit(20).all()
+        return [{"id": a.id, "tipo": a.tipo, "mensaje": a.mensaje, "creado_en": _como_aware_utc(a.creado_en)} for a in filas]
+    finally:
+        session.close()
+
+
+def marcar_avisos_vistos(tenant_id):
+    session = _obtener_session()
+    try:
+        session.query(Aviso).filter_by(tenant_id=tenant_id, visto=False).update({"visto": True})
+        session.commit()
     finally:
         session.close()
