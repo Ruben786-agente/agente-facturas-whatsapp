@@ -112,7 +112,7 @@ def _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, motivo)
         proveedor_nombre=((factura.get("emisor") or {}).get("nombre") or "").strip() or "(desconocido)",
         total_factura=factura.get("total_factura") or 0, destino="REVISION", motivo=motivo,
     )
-    return {"accion": "revision", "empresa": empresa["nombre"], "motivo": motivo}
+    return {"accion": "revision", "empresa": empresa["nombre"], "cif": empresa["cif_nif"], "motivo": motivo}
 
 
 def _guardar_ticket(storage, tenant_id, empresa, nombre, contenido, factura):
@@ -131,7 +131,7 @@ def _guardar_ticket(storage, tenant_id, empresa, nombre, contenido, factura):
         proveedor_cif=ticket["proveedor"].get("cif_nif"), proveedor_nombre=ticket["proveedor"]["nombre"] or "(desconocido)",
         total_factura=ticket["total_factura"] or 0, destino="TICKETS",
     )
-    return {"accion": "ticket", "empresa": empresa["nombre"], "posible_duplicado": bool(posible_duplicado)}
+    return {"accion": "ticket", "empresa": empresa["nombre"], "cif": empresa["cif_nif"], "posible_duplicado": bool(posible_duplicado)}
 
 
 def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura):
@@ -144,7 +144,7 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura):
             if (f.get("destino") == "PROCESADA" and f["num_factura"] == numero
                     and _normaliza_cif(f["emisor"].get("cif_nif")) == cif_emisor
                     and abs(f["total_factura"] - total) <= 0.01):
-                return {"accion": "duplicado_exacto", "empresa": empresa["nombre"]}
+                return {"accion": "duplicado_exacto", "empresa": empresa["nombre"], "cif": empresa["cif_nif"]}
 
     try:
         periodo = calcular_periodo_trimestral(factura["fecha_factura"])
@@ -171,23 +171,29 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura):
         proveedor_nombre=((factura.get("emisor") or {}).get("nombre") or "").strip() or "(desconocido)",
         total_factura=total, destino="PROCESADA",
     )
-    return {"accion": "procesada", "empresa": empresa["nombre"], "excel": nombre_excel}
+    return {"accion": "procesada", "empresa": empresa["nombre"], "cif": empresa["cif_nif"], "excel": nombre_excel}
 
 
-def procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=None):
+def procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=None, diferir_dudosas=False):
     """
     Procesa un documento (bytes) y lo archiva en el OneDrive de la gestoría.
     Devuelve un dict con "accion": ignorado | sin_identificar | ticket | procesada |
     revision | duplicado_exacto. El llamador se encarga de lo que hay en el canal de
     origen (marcar el correo como leído, borrar el archivo de la carpeta de entrada...).
     'extraer' permite sustituir la lectura con IA (útil para pruebas).
+    'diferir_dudosas': usado por los lotes; una lectura dudosa de una empresa aún desconocida
+    no se archiva todavía y devuelve "en_espera" (con la factura leída) para reintentarla
+    cuando termine el lote.
     """
     factura = (extraer or extraer_factura)(contenido)
     if not factura.get("es_documento_fiscal", True):
         return {"accion": "ignorado"}
+    return _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, factura, diferir_dudosas)
 
+
+def _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, factura, diferir=False, forzar_revision=None):
     try:
-        return _archivar(storage, tenant_id, contenido, nombre_original, factura)
+        return _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir, forzar_revision)
     except requests.HTTPError as e:
         if e.response is None or e.response.status_code != 404:
             raise
@@ -207,15 +213,18 @@ def procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=N
             f"Faltaba {donde} en OneDrive: se borró o se movió. El agente la ha vuelto a crear. "
             "Lo que había dentro no se recupera solo: puedes buscarlo en la papelera de OneDrive.",
         )
-        return _archivar(storage, tenant_id, contenido, nombre_original, factura)
+        return _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir, forzar_revision)
 
 
-def _archivar(storage, tenant_id, contenido, nombre_original, factura):
+def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=False, forzar_revision=None):
     nombre = _nombre_unico(nombre_original, factura, contenido)
     destinatario = factura.get("destinatario") or {}
     cif = _normaliza_cif(destinatario.get("cif_nif"))
 
     if not cif:
+        if diferir and not es_ticket(factura):
+            # En un lote, la empresa puede deducirse de las demás facturas (se decide al final).
+            return {"accion": "en_espera", "razon": "sin_cif", "factura": factura}
         return _sin_identificar(storage, tenant_id, nombre, contenido, "sin CIF del comprador")
     if not _cif_valido(cif):
         return _sin_identificar(storage, tenant_id, nombre, contenido, "CIF del comprador con formato no válido")
@@ -227,7 +236,12 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura):
         alta_empresa_cliente(storage, tenant_id, (destinatario.get("nombre") or "").strip() or cif, cif)
     empresa = resolver_empresa_cliente_por_cif(tenant_id, [cif])
     if not empresa:
+        if diferir:
+            return {"accion": "en_espera", "razon": "dudosa", "factura": factura}
         return _sin_identificar(storage, tenant_id, nombre, contenido, "lectura dudosa de una empresa desconocida")
+
+    if forzar_revision:
+        return _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, forzar_revision)
 
     if es_ticket(factura):
         return _guardar_ticket(storage, tenant_id, empresa, nombre, contenido, factura)
@@ -258,14 +272,39 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
     base = os.path.splitext(os.path.basename(nombre_original))[0]
     log.info("'%s': %d páginas -> %d documentos", nombre_original, total, len(partes))
 
-    resultados, primer_error = [], None
+    resultados, primer_error, en_espera = [], None, []
     for grupo, parte in zip(grupos, partes):
         rango = f"p{grupo[0]}" if len(grupo) == 1 else f"p{grupo[0]}-{grupo[-1]}"
+        nombre_parte = f"{base}_{rango}.pdf"
         try:
-            resultados.append(procesar_documento(storage, tenant_id, parte, f"{base}_{rango}.pdf", extraer=extraer))
+            res = procesar_documento(storage, tenant_id, parte, nombre_parte, extraer=extraer, diferir_dudosas=True)
         except Exception as e:
             log.exception("Fallo procesando %s de '%s'", rango, nombre_original)
             primer_error = primer_error or e
+            continue
+        if res.get("accion") == "en_espera":
+            en_espera.append((len(resultados), parte, nombre_parte, res["factura"], res.get("razon")))
+        resultados.append(res)
+
+    # Segunda vuelta, ya con el lote entero procesado:
+    #  - lectura dudosa de una empresa desconocida: otra factura del lote pudo crearla ya;
+    #  - factura sin CIF del comprador: si todas las demás del lote son de una única empresa,
+    #    se asigna a ella, pero siempre a Revisión para que la gestoría lo confirme.
+    empresas_del_lote = {r["cif"] for r in resultados if r.get("cif")}
+    for posicion, parte, nombre_parte, factura, razon in en_espera:
+        forzar = None
+        if razon == "sin_cif":
+            if len(empresas_del_lote) == 1:
+                cif_lote = next(iter(empresas_del_lote))
+                factura = {**factura, "destinatario": {**(factura.get("destinatario") or {}), "cif_nif": cif_lote}}
+                forzar = "no se leyó el CIF del comprador; asignada a la empresa del resto del lote"
+        try:
+            resultados[posicion] = _archivar_con_reparacion(storage, tenant_id, parte, nombre_parte, factura,
+                                                            forzar_revision=forzar)
+        except Exception as e:
+            log.exception("Fallo en la segunda vuelta de %s", nombre_parte)
+            primer_error = primer_error or e
+            resultados[posicion] = {"accion": "error"}
     if primer_error:
         raise primer_error
     return resultados

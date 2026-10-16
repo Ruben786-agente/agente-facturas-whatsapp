@@ -562,39 +562,98 @@ def resolver_tenant_por_stripe_customer_id(stripe_customer_id):
 # Panel web: resumen y pendientes
 # ---------------------------------------------------------------------------
 
-def obtener_resumen_panel(tenant_id):
+def _plazo_303(anio, trimestre):
+    """Último día habitual para presentar el IVA (modelo 303) de un trimestre."""
+    from datetime import date, timedelta
+    if trimestre == 4:
+        d = date(anio + 1, 1, 30)
+    else:
+        d = date(anio, {1: 4, 2: 7, 3: 10}[trimestre], 20)
+    while d.weekday() >= 5:  # si cae en fin de semana, pasa al lunes
+        d += timedelta(days=1)
+    return d
+
+
+def _trimestre_en_plazo(hoy):
+    """El trimestre ya terminado cuyo plazo de presentación aún no ha vencido (o None)."""
+    candidatos = []
+    for anio in (hoy.year - 1, hoy.year):
+        for t in (1, 2, 3, 4):
+            terminado = (hoy.year, hoy.month) > (anio, t * 3)
+            plazo = _plazo_303(anio, t)
+            if terminado and plazo >= hoy:
+                candidatos.append((plazo, anio, t))
+    if not candidatos:
+        return None
+    plazo, anio, t = min(candidatos)
+    return {"anio": anio, "trimestre": t, "plazo": plazo, "dias": (plazo - hoy).days}
+
+
+def obtener_resumen_panel(tenant_id, trimestre=None):
     """
-    Para el panel de la gestoría: cuántas facturas hay en cada estado, y el
-    detalle de las que necesitan atención (Tickets, Revisión, Sin identificar).
+    Para el panel de la gestoría:
+      - resumen: cuántos documentos hay en cada estado (de todo el histórico),
+      - clientes: una fila por empresa cliente y trimestre (facturas, total, tickets, revisión),
+      - atencion: lo que la gestoría tiene que mirar (Revisión y Sin identificar),
+      - plazo: cuenta atrás del modelo 303 y cuántos clientes tienen algo sin revisar en ese trimestre.
+    'trimestre' (p. ej. "2024-1") filtra las filas de clientes.
     """
+    from datetime import date
     session = _obtener_session()
     try:
         filas = (
-            session.query(FacturaCache, EmpresaCliente.nombre)
+            session.query(FacturaCache, EmpresaCliente.nombre, EmpresaCliente.cif_nif)
             .join(EmpresaCliente, FacturaCache.empresa_cliente_id == EmpresaCliente.id)
             .filter(FacturaCache.tenant_id == tenant_id)
             .order_by(FacturaCache.procesada_en.desc())
             .all()
         )
         resumen = {"PROCESADA": 0, "TICKETS": 0, "REVISION": 0, "SIN_IDENTIFICAR": 0}
-        pendientes = []
-        for f, nombre_empresa in filas:
+        atencion, grupos = [], {}
+        for f, nombre_empresa, cif in filas:
             resumen[f.destino] = resumen.get(f.destino, 0) + 1
-            if f.destino in ("TICKETS", "REVISION"):
-                pendientes.append({
+            clave = (cif, f.fecha_factura.year, (f.fecha_factura.month - 1) // 3 + 1)
+            g = grupos.setdefault(clave, {
+                "empresa": nombre_empresa, "cif": cif, "anio": clave[1], "trimestre": clave[2],
+                "facturas": 0, "total": 0.0, "tickets": 0, "revision": 0,
+            })
+            if f.destino == "PROCESADA":
+                g["facturas"] += 1
+                g["total"] += float(f.total_factura)
+            elif f.destino == "TICKETS":
+                g["tickets"] += 1
+            elif f.destino == "REVISION":
+                g["revision"] += 1
+                atencion.append({
                     "empresa": nombre_empresa, "fecha": f.fecha_factura.strftime("%d/%m/%Y"),
                     "proveedor": f.proveedor_nombre or "(desconocido)", "total": float(f.total_factura),
-                    "destino": f.destino, "motivo": f.motivo,
+                    "destino": "REVISION", "motivo": f.motivo,
                 })
         sin_id = (session.query(DocumentoSinIdentificar).filter_by(tenant_id=tenant_id)
                   .order_by(DocumentoSinIdentificar.registrado_en.desc()).all())
         resumen["SIN_IDENTIFICAR"] = len(sin_id)
         for d in sin_id:
-            pendientes.append({
+            atencion.append({
                 "empresa": "(sin identificar)", "fecha": _como_aware_utc(d.registrado_en).strftime("%d/%m/%Y"),
                 "proveedor": d.nombre_archivo, "total": None, "destino": "SIN_IDENTIFICAR", "motivo": d.motivo,
             })
-        return {"resumen": resumen, "pendientes": pendientes[:50]}
+
+        todos = sorted(grupos.values(), key=lambda g: (-g["anio"], -g["trimestre"], g["empresa"]))
+        trimestres = sorted({(g["anio"], g["trimestre"]) for g in todos}, reverse=True)
+        clientes = todos
+        if trimestre:
+            clientes = [g for g in todos if f'{g["anio"]}-{g["trimestre"]}' == trimestre]
+        for g in clientes:
+            g["total"] = round(g["total"], 2)
+            g["estado"] = "REVISAR" if g["revision"] else ("LISTO" if g["facturas"] else "SIN_FACTURAS")
+
+        plazo = _trimestre_en_plazo(date.today())
+        if plazo:
+            del_trim = [g for g in todos if (g["anio"], g["trimestre"]) == (plazo["anio"], plazo["trimestre"])]
+            plazo["clientes"] = len(del_trim)
+            plazo["con_revision"] = sum(1 for g in del_trim if g["revision"])
+        return {"resumen": resumen, "clientes": clientes, "atencion": atencion[:100],
+                "trimestres": trimestres, "plazo": plazo}
     finally:
         session.close()
 
