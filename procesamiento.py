@@ -203,3 +203,40 @@ def procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=N
     if es_ticket(factura):
         return _guardar_ticket(storage, tenant_id, empresa, nombre, contenido, factura)
     return _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura)
+
+
+def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=None, dividir=None):
+    """
+    Punto de entrada para los canales (correo, OneDrive, WhatsApp). Si el archivo es un PDF
+    con varias páginas, lo separa en documentos sueltos (un lote escaneado trae varias
+    facturas) y procesa cada uno; si no, equivale a procesar_documento.
+    Devuelve una lista de resultados, uno por documento. Si algún documento falla, se
+    procesan igualmente los demás y al final se vuelve a lanzar el error para que el canal
+    reintente (las facturas ya anotadas no se duplican).
+    """
+    import dividir_pdf
+
+    total = dividir_pdf.contar_paginas(contenido) if contenido[:4] == b"%PDF" else 0
+    if total <= 1:
+        return [procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=extraer)]
+    if total > dividir_pdf.MAX_PAGINAS:
+        log.warning("PDF de %d páginas, demasiado largo para dividir; va a Sin identificar", total)
+        return [_sin_identificar(storage, tenant_id, nombre_original, contenido,
+                                 f"PDF de {total} paginas, dividir a mano")]
+
+    grupos = (dividir or dividir_pdf.detectar_documentos)(contenido, total)
+    partes = dividir_pdf.cortar_pdf(contenido, grupos)
+    base = os.path.splitext(os.path.basename(nombre_original))[0]
+    log.info("'%s': %d páginas -> %d documentos", nombre_original, total, len(partes))
+
+    resultados, primer_error = [], None
+    for grupo, parte in zip(grupos, partes):
+        rango = f"p{grupo[0]}" if len(grupo) == 1 else f"p{grupo[0]}-{grupo[-1]}"
+        try:
+            resultados.append(procesar_documento(storage, tenant_id, parte, f"{base}_{rango}.pdf", extraer=extraer))
+        except Exception as e:
+            log.exception("Fallo procesando %s de '%s'", rango, nombre_original)
+            primer_error = primer_error or e
+    if primer_error:
+        raise primer_error
+    return resultados

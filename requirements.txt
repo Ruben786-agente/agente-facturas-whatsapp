@@ -9,3 +9,4 @@ requests
 anthropic
 msal
 openpyxl
+pypdf
