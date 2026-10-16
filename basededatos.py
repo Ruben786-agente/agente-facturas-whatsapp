@@ -121,11 +121,14 @@ _Session = None
 
 def _obtener_session():
     global _engine, _Session
-    if _engine is None:
+    if _Session is None:
+        # Solo se guarda el resultado si TODO ha ido bien; si la base de datos
+        # estaba caída o pausada, la siguiente petición vuelve a intentarlo.
         url = os.environ.get("DATABASE_URL", "sqlite:///local_prueba.db")
-        _engine = create_engine(url)
-        Base.metadata.create_all(_engine)
-        _Session = sessionmaker(bind=_engine)
+        motor = create_engine(url, pool_pre_ping=True)
+        Base.metadata.create_all(motor)
+        _engine = motor
+        _Session = sessionmaker(bind=motor)
     return _Session()
 
 
@@ -597,5 +600,24 @@ def obtener_estado_conexiones(tenant_id):
             "gmail": "gmail" in provs, "gmail_cuenta": provs.get("gmail"),
             "gmail_error": estado_correo.error if estado_correo else None,
         }
+    finally:
+        session.close()
+
+
+def actualizar_carpetas_empresa(tenant_id, cif_nif, carpetas):
+    """Sustituye los ids de carpetas de una empresa (cuando se han recreado en OneDrive)."""
+    cif_nif = cif_nif.strip().upper()
+    session = _obtener_session()
+    try:
+        e = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=cif_nif).first()
+        if not e:
+            return False
+        e.carpeta_raiz_id = carpetas["raiz"]
+        e.carpeta_facturas_id = carpetas["facturas"]
+        e.carpeta_tickets_id = carpetas["tickets"]
+        e.carpeta_revision_id = carpetas["revision"]
+        e.carpeta_excel_id = carpetas["excel"]
+        session.commit()
+        return True
     finally:
         session.close()

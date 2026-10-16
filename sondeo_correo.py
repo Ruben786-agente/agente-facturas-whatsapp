@@ -9,7 +9,7 @@ from autenticacion_onedrive import refrescar_token as refrescar_token_ms
 from basededatos import (correo_ya_procesado, guardar_estado_correo, marcar_correo_procesado,
                          obtener_estado_correo, obtener_refresh_token, tenants_con_correo)
 from lector_gmail import LectorGmail
-from procesamiento import procesar_documento
+from procesamiento import procesar_archivo
 
 log = logging.getLogger("sondeo_correo")
 
@@ -34,19 +34,21 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
 
     punto_actual = obtener_estado_correo(tenant_id)["ultimo_mensaje_ts"] or int(time.time()) - DIAS_PRIMERA_LECTURA * 86400
     ids = lector.mensajes_nuevos(max(0, punto_actual - MARGEN_SEGUNDOS))
-    log.info("Correo %s: %d mensajes con adjunto desde el punto de lectura", tenant_id, len(ids))
+    pendientes = [m for m in ids if not correo_ya_procesado(tenant_id, m)]
+    log.info("Correo %s: %d mensajes con adjunto encontrados, %d por procesar", tenant_id, len(ids), len(pendientes))
 
     max_ok, primer_fallo = None, None
     for mensaje_id in ids:
         if correo_ya_procesado(tenant_id, mensaje_id):
+            log.debug("Correo %s: mensaje %s ya procesado, se salta", tenant_id, mensaje_id)
             continue
         fecha = None
         try:
             fecha, adjuntos = lector.adjuntos_utiles(mensaje_id)
             log.info("Correo %s: mensaje %s con %d adjuntos útiles", tenant_id, mensaje_id, len(adjuntos))
             for nombre, contenido in adjuntos:
-                resultado = procesar_documento(storage, tenant_id, contenido, nombre)
-                log.info("Correo %s: '%s' -> %s", tenant_id, nombre, (resultado or {}).get("accion"))
+                resultados = procesar_archivo(storage, tenant_id, contenido, nombre)
+                log.info("Correo %s: '%s' -> %s", tenant_id, nombre, [(r or {}).get("accion") for r in resultados])
             marcar_correo_procesado(tenant_id, mensaje_id)
             max_ok = max(max_ok or 0, fecha)
         except Exception:

@@ -50,6 +50,7 @@ PLANTILLA_LOGIN = """
 PLANTILLA_PANEL = """
 <!doctype html><html lang="es"><head><meta charset="utf-8">
 <title>Panel - Agente Facturas</title>
+<meta http-equiv="refresh" content="30">
 <style>
   body { font-family: Arial, sans-serif; background: #f4f5f7; margin: 0; padding: 2rem; }
   .resumen { display: flex; gap: 1rem; margin-bottom: 2rem; }

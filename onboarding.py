@@ -14,7 +14,7 @@ empresa-cliente; el agente crea todo en su OneDrive:
 
 import re
 
-from basededatos import registrar_empresa_cliente, guardar_carpeta_sin_identificar, resolver_empresa_cliente_por_cif
+from basededatos import registrar_empresa_cliente, actualizar_carpetas_empresa, guardar_carpeta_sin_identificar, resolver_empresa_cliente_por_cif
 
 CARPETA_RAIZ = "Agente Facturas"
 SUBCARPETAS = {"facturas": "Facturas", "tickets": "Tickets", "revision": "Revisión", "excel": "Excel"}
@@ -60,6 +60,18 @@ def alta_empresa_cliente(storage, tenant_id, nombre, cif):
     empresa_id = registrar_empresa_cliente(tenant_id, cif, nombre, carpetas)
     enlace = storage.crear_enlace_subida(carpetas["facturas"])
     return {"empresa_id": empresa_id, "enlace_subida": enlace, "nueva": True}
+
+
+def reparar_empresa(storage, tenant_id, nombre, cif):
+    """Vuelve a crear (o a encontrar) las carpetas de una empresa y actualiza la base de datos.
+    Se usa cuando alguien ha borrado o movido carpetas en OneDrive."""
+    raiz_id = storage.crear_carpeta("root", CARPETA_RAIZ)
+    empresa_carpeta = storage.crear_carpeta(raiz_id, _nombre_seguro(f"{nombre} - {cif}"))
+    carpetas = {"raiz": empresa_carpeta}
+    for clave, nombre_carpeta in SUBCARPETAS.items():
+        carpetas[clave] = storage.crear_carpeta(empresa_carpeta, nombre_carpeta)
+    actualizar_carpetas_empresa(tenant_id, cif, carpetas)
+    return carpetas
 
 
 def alta_varias_empresas(storage, tenant_id, empresas):

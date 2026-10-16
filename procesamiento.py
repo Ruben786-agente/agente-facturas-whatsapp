@@ -20,6 +20,8 @@ import hashlib
 import logging
 import os
 import re
+
+import requests
 from datetime import datetime
 
 from basededatos import (
@@ -29,7 +31,7 @@ from basededatos import (
 from clasificador_documentos import es_ticket, nombre_archivo_destino, procesar_ticket
 from extraccion_ia import extraer_factura, factura_a_ticket_ligero, _detectar_media_type
 from generar_excel_mieos import anadir_factura_a_excel
-from onboarding import alta_empresa_cliente, preparar_gestoria
+from onboarding import alta_empresa_cliente, preparar_gestoria, reparar_empresa
 from periodo_fiscal import calcular_periodo_trimestral, periodo_a_slug
 
 log = logging.getLogger("procesamiento")
@@ -182,6 +184,23 @@ def procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=N
     if not factura.get("es_documento_fiscal", True):
         return {"accion": "ignorado"}
 
+    try:
+        return _archivar(storage, tenant_id, contenido, nombre_original, factura)
+    except requests.HTTPError as e:
+        if e.response is None or e.response.status_code != 404:
+            raise
+        # Una carpeta guardada ya no existe en OneDrive (alguien la borró o la movió):
+        # se recrean las que falten y se reintenta UNA vez, sin volver a llamar a la IA.
+        log.warning("Carpeta no encontrada en OneDrive; se recrean y se reintenta")
+        preparar_gestoria(storage, tenant_id)
+        cif = _normaliza_cif(((factura.get("destinatario") or {}).get("cif_nif")))
+        empresa = resolver_empresa_cliente_por_cif(tenant_id, [cif]) if cif else None
+        if empresa:
+            reparar_empresa(storage, tenant_id, empresa["nombre"], empresa["cif_nif"])
+        return _archivar(storage, tenant_id, contenido, nombre_original, factura)
+
+
+def _archivar(storage, tenant_id, contenido, nombre_original, factura):
     nombre = _nombre_unico(nombre_original, factura, contenido)
     destinatario = factura.get("destinatario") or {}
     cif = _normaliza_cif(destinatario.get("cif_nif"))
