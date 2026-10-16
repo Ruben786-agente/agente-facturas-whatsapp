@@ -83,11 +83,19 @@ def _detectar_media_type(contenido: bytes) -> str:
 
 
 def _extraer_json(texto: str) -> dict:
-    texto = texto.strip()
-    coincidencia = re.search(r"\{.*\}", texto, re.DOTALL)
-    if coincidencia:
-        texto = coincidencia.group(0)
-    return json.loads(texto)
+    """Coge el PRIMER objeto JSON completo de la respuesta, aunque venga con texto,
+    bloques de código o varios objetos seguidos."""
+    decodificador = json.JSONDecoder()
+    inicio = texto.find("{")
+    while inicio != -1:
+        try:
+            objeto, _ = decodificador.raw_decode(texto[inicio:])
+            if isinstance(objeto, dict):
+                return objeto
+        except json.JSONDecodeError:
+            pass
+        inicio = texto.find("{", inicio + 1)
+    raise json.JSONDecodeError("No hay ningún objeto JSON en la respuesta", texto, 0)
 
 
 def _respuesta_por_defecto(motivo: str) -> dict:
@@ -116,13 +124,19 @@ def extraer_factura(contenido: bytes) -> dict:
     try:
         cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         respuesta = cliente.messages.create(
-            model=MODELO, max_tokens=1500, system=PROMPT,
+            model=MODELO, max_tokens=4000, system=PROMPT,
             messages=[{"role": "user", "content": [
                 bloque, {"type": "text", "text": "Extrae los datos de este documento según las instrucciones."},
             ]}],
         )
         texto = "".join(b.text for b in respuesta.content if b.type == "text")
-        datos = _extraer_json(texto)
+        if respuesta.stop_reason == "max_tokens":
+            log.warning("La respuesta de la IA se cortó por longitud")
+        try:
+            datos = _extraer_json(texto)
+        except json.JSONDecodeError:
+            log.warning("Respuesta de la IA no válida (empieza por): %r", texto[:300])
+            raise
 
         if datos.get("es_documento_fiscal") is False:
             return {**_respuesta_por_defecto("no es un documento fiscal"), "es_documento_fiscal": False}

@@ -34,6 +34,7 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
 
     punto_actual = obtener_estado_correo(tenant_id)["ultimo_mensaje_ts"] or int(time.time()) - DIAS_PRIMERA_LECTURA * 86400
     ids = lector.mensajes_nuevos(max(0, punto_actual - MARGEN_SEGUNDOS))
+    log.info("Correo %s: %d mensajes con adjunto desde el punto de lectura", tenant_id, len(ids))
 
     max_ok, primer_fallo = None, None
     for mensaje_id in ids:
@@ -42,8 +43,10 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
         fecha = None
         try:
             fecha, adjuntos = lector.adjuntos_utiles(mensaje_id)
+            log.info("Correo %s: mensaje %s con %d adjuntos útiles", tenant_id, mensaje_id, len(adjuntos))
             for nombre, contenido in adjuntos:
-                procesar_documento(storage, tenant_id, contenido, nombre)
+                resultado = procesar_documento(storage, tenant_id, contenido, nombre)
+                log.info("Correo %s: '%s' -> %s", tenant_id, nombre, (resultado or {}).get("accion"))
             marcar_correo_procesado(tenant_id, mensaje_id)
             max_ok = max(max_ok or 0, fecha)
         except Exception:
@@ -58,7 +61,9 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
 
 
 def ciclo_correo():
-    for tenant_id in tenants_con_correo():
+    tenants = tenants_con_correo()
+    log.info("Ciclo de correo: %d gestorías con Gmail y OneDrive conectados", len(tenants))
+    for tenant_id in tenants:
         try:
             _procesar_tenant(tenant_id)
         except Exception:
