@@ -8,17 +8,14 @@ pide el almacenamiento aquí en vez de asumir OneDrive.
 from almacenamiento import obtener_almacenamiento
 from autenticacion_google import refrescar_token as refrescar_token_google
 from autenticacion_onedrive import refrescar_token as refrescar_token_ms
-from basededatos import obtener_refresh_token
+from basededatos import obtener_refresh_token, proveedor_almacenamiento_activo
 
 NOMBRES = {"onedrive": "OneDrive", "gdrive": "Google Drive"}
 
 
 def proveedor_almacenamiento(tenant_id):
     """'onedrive', 'gdrive' o None si aún no ha conectado ninguno."""
-    for proveedor in ("onedrive", "gdrive"):
-        if obtener_refresh_token(tenant_id, proveedor):
-            return proveedor
-    return None
+    return proveedor_almacenamiento_activo(tenant_id)
 
 
 def storage_para_tenant(tenant_id):

@@ -431,6 +431,15 @@ def guardar_credencial(tenant_id, proveedor, refresh_token, cuenta=None):
             session.add(cred)
         cred.refresh_token_cifrado = cifrar_refresh_token(refresh_token)
         cred.cuenta_conectada = cuenta
+        if proveedor in ("onedrive", "gdrive"):
+            # Solo un almacenamiento a la vez: al conectar uno nuevo se quita el otro.
+            otro = "gdrive" if proveedor == "onedrive" else "onedrive"
+            viejo = session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id, proveedor=otro).first()
+            if viejo is not None:
+                session.delete(viejo)
+                g = session.get(Gestoria, tenant_id)
+                if g:
+                    g.carpeta_sin_identificar_id = None
         cred.conectada_en = datetime.now(timezone.utc)
         session.commit()
     finally:
@@ -457,6 +466,21 @@ def eliminar_credencial(tenant_id, proveedor):
                 estado.error = None
         session.commit()
         return token
+    finally:
+        session.close()
+
+
+def proveedor_almacenamiento_activo(tenant_id):
+    """'onedrive', 'gdrive' o None. Si por lo que sea hubiera los dos conectados, manda el último que se conectó."""
+    session = _obtener_session()
+    try:
+        creds = session.query(CredencialAlmacenamiento).filter(
+            CredencialAlmacenamiento.tenant_id == tenant_id,
+            CredencialAlmacenamiento.proveedor.in_(("onedrive", "gdrive"))).all()
+        if not creds:
+            return None
+        ultima = max(creds, key=lambda c: _como_aware_utc(c.conectada_en) if c.conectada_en else datetime.min.replace(tzinfo=timezone.utc))
+        return ultima.proveedor
     finally:
         session.close()
 
@@ -867,7 +891,7 @@ def obtener_estado_conexiones(tenant_id):
             "email": g.email_contacto,
             "onedrive": "onedrive" in provs, "onedrive_cuenta": provs.get("onedrive"),
             "gdrive": "gdrive" in provs, "gdrive_cuenta": provs.get("gdrive"),
-            "almacenamiento": "onedrive" if "onedrive" in provs else ("gdrive" if "gdrive" in provs else None),
+            "almacenamiento": proveedor_almacenamiento_activo(tenant_id),
             "gmail": "gmail" in provs, "gmail_cuenta": provs.get("gmail"),
             "gmail_error": estado_correo.error if estado_correo else None,
         }
