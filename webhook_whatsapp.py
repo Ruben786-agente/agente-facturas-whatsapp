@@ -19,7 +19,7 @@ from basededatos import (
 )
 from clasificador_documentos import es_ticket, nombre_archivo_destino, procesar_ticket
 from almacenamiento import obtener_almacenamiento
-from autenticacion_onedrive import refrescar_token
+from almacenamiento_tenant import storage_para_tenant
 from generar_excel_mieos import anadir_factura_a_excel
 from periodo_fiscal import calcular_periodo_trimestral, periodo_a_slug
 from extraccion_ia import extraer_factura, factura_a_ticket_ligero
@@ -93,12 +93,10 @@ def _procesar_mensaje(phone_number_id, mensaje):
     nombre_archivo = mensaje[tipo].get("filename", f"whatsapp_{media_id}.jpg")
     contenido = _descargar_media(media_id, tenant["access_token"])
 
-    refresh_token_onedrive = obtener_refresh_token_onedrive(tenant["tenant_id"])
-    if not refresh_token_onedrive:
-        log.error("Tenant %s no tiene OneDrive conectado -- no se puede archivar nada", tenant["tenant_id"])
+    storage = storage_para_tenant(tenant["tenant_id"])
+    if storage is None:
+        log.error("Tenant %s no tiene almacenamiento conectado -- no se puede archivar nada", tenant["tenant_id"])
         return
-    tokens_onedrive = refrescar_token(refresh_token_onedrive)
-    storage = obtener_almacenamiento("onedrive", access_token=tokens_onedrive["access_token"])
 
     factura_completa = extraer_factura(contenido)
 

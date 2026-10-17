@@ -420,7 +420,7 @@ def guardar_credencial(tenant_id, proveedor, refresh_token, cuenta=None):
 # ---------------------------------------------------------------------------
 
 def tenants_con_correo():
-    """Gestorías con acceso vigente que tienen Gmail Y OneDrive conectados."""
+    """Gestorías con acceso vigente que tienen Gmail y un almacenamiento (OneDrive o Google Drive) conectados."""
     session = _obtener_session()
     try:
         ahora = datetime.now(timezone.utc)
@@ -431,7 +431,7 @@ def tenants_con_correo():
             if not vigente:
                 continue
             provs = {c.proveedor for c in session.query(CredencialAlmacenamiento).filter_by(tenant_id=g.tenant_id)}
-            if {"gmail", "onedrive"} <= provs:
+            if "gmail" in provs and ({"onedrive", "gdrive"} & provs):
                 resultado.append(g.tenant_id)
         return resultado
     finally:
@@ -768,6 +768,8 @@ def obtener_estado_conexiones(tenant_id):
             "trial_expira_en": _como_aware_utc(g.trial_expira_en) if g.trial_expira_en else None,
             "email": g.email_contacto,
             "onedrive": "onedrive" in provs, "onedrive_cuenta": provs.get("onedrive"),
+            "gdrive": "gdrive" in provs, "gdrive_cuenta": provs.get("gdrive"),
+            "almacenamiento": "onedrive" if "onedrive" in provs else ("gdrive" if "gdrive" in provs else None),
             "gmail": "gmail" in provs, "gmail_cuenta": provs.get("gmail"),
             "gmail_error": estado_correo.error if estado_correo else None,
         }

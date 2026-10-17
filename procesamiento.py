@@ -207,7 +207,7 @@ def _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, fac
             raise
         # Una carpeta guardada ya no existe en OneDrive (alguien la borró o la movió):
         # se recrean las que falten y se reintenta UNA vez, sin volver a llamar a la IA.
-        log.warning("Carpeta no encontrada en OneDrive; se recrean y se reintenta")
+        log.warning("Carpeta no encontrada en el almacenamiento; se recrean y se reintenta")
         preparar_gestoria(storage, tenant_id)
         cif = _normaliza_cif(((factura.get("destinatario") or {}).get("cif_nif")))
         empresa = resolver_empresa_cliente_por_cif(tenant_id, [cif]) if cif else None
@@ -218,8 +218,8 @@ def _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, fac
             donde = "una carpeta de Agente Facturas (por ejemplo «Sin identificar»)"
         crear_aviso(
             tenant_id, "carpeta_recreada",
-            f"Faltaba {donde} en OneDrive: se borró o se movió. El agente la ha vuelto a crear. "
-            "Lo que había dentro no se recupera solo: puedes buscarlo en la papelera de OneDrive.",
+            f"Faltaba {donde} en tu almacenamiento (OneDrive o Google Drive): se borró o se movió. El agente la ha vuelto a crear. "
+            "Lo que había dentro no se recupera solo: puedes buscarlo en la papelera de tu OneDrive o Google Drive.",
         )
         return _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir, forzar_revision)
 

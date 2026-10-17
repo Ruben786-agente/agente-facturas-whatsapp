@@ -131,11 +131,11 @@ PLANTILLA_PANEL = """
       <td>{{ p.motivo or "-" }}</td>
       <td>
         {% if p.destino == "REVISION" %}
-          <a class="btn" href="{{ url_for('revision.abrir_revision', factura_id=p.id) }}" target="_blank">Abrir en OneDrive</a>
+          <a class="btn" href="{{ url_for('revision.abrir_revision', factura_id=p.id) }}" target="_blank">Abrir carpeta</a>
           {% if p.corregible %}<a class="btn principal" href="{{ url_for('revision.corregir', factura_id=p.id) }}">Corregir y añadir al Excel</a>{% endif %}
           <form class="en-linea" method="post" action="{{ url_for('revision.revisada', factura_id=p.id) }}"><button class="btn" type="submit">Marcar como revisada</button></form>
         {% else %}
-          <a class="btn" href="{{ url_for('revision.abrir_sin_identificar') }}" target="_blank">Abrir en OneDrive</a>
+          <a class="btn" href="{{ url_for('revision.abrir_sin_identificar') }}" target="_blank">Abrir carpeta</a>
           <form class="en-linea" method="post" action="{{ url_for('revision.sin_identificar_revisado', documento_id=p.id) }}"><button class="btn" type="submit">Marcar como revisado</button></form>
         {% endif %}
       </td>
@@ -203,7 +203,7 @@ def panel():
     filtro = request.args.get("t", "").strip()
     datos = obtener_resumen_panel(session["tenant_id"], trimestre=filtro or None)
     e = obtener_estado_conexiones(session["tenant_id"])
-    aviso = e["gmail_error"] or (None if e["onedrive"] else "Falta conectar OneDrive.")
+    aviso = e["gmail_error"] or (None if e["almacenamiento"] else "Falta conectar OneDrive o Google Drive.")
     return render_template_string(
         PLANTILLA_PANEL, resumen=datos["resumen"], atencion=datos["atencion"], clientes=datos["clientes"],
         trimestres=datos["trimestres"], plazo=datos["plazo"], ahorro=datos["ahorro"], filtro=filtro, aviso=aviso,

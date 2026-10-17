@@ -3,10 +3,9 @@
 import logging
 import time
 
-from almacenamiento import obtener_almacenamiento
 from autenticacion_google import ErrorAutorizacionGoogle, refrescar_token as refrescar_token_google
-from autenticacion_onedrive import refrescar_token as refrescar_token_ms
-from basededatos import (correo_ya_procesado, guardar_estado_correo, marcar_correo_procesado,
+from almacenamiento_tenant import storage_para_tenant
+from basededatos import (correo_ya_procesado, crear_aviso, guardar_estado_correo, marcar_correo_procesado,
                          obtener_estado_correo, obtener_refresh_token, tenants_con_correo)
 from lector_gmail import LectorGmail
 from procesamiento import procesar_archivo
@@ -21,8 +20,7 @@ MARGEN_SEGUNDOS = 3600
 def _procesar_tenant(tenant_id, lector=None, storage=None):
     if lector is None or storage is None:
         refresh_gmail = obtener_refresh_token(tenant_id, "gmail")
-        refresh_onedrive = obtener_refresh_token(tenant_id, "onedrive")
-        if not refresh_gmail or not refresh_onedrive:
+        if not refresh_gmail:
             return
         try:
             token_gmail = refrescar_token_google(refresh_gmail)["access_token"]
@@ -30,7 +28,13 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
             guardar_estado_correo(tenant_id, error=str(e))
             return
         lector = LectorGmail(token_gmail)
-        storage = obtener_almacenamiento("onedrive", access_token=refrescar_token_ms(refresh_onedrive)["access_token"])
+        try:
+            storage = storage_para_tenant(tenant_id)
+        except ErrorAutorizacionGoogle as e:  # Google Drive revocado o caducado
+            crear_aviso(tenant_id, "drive_desconectado", f"{e}. Entra en Conexiones y vuelve a conectar Google Drive.")
+            return
+        if storage is None:
+            return
 
     punto_actual = obtener_estado_correo(tenant_id)["ultimo_mensaje_ts"] or int(time.time()) - DIAS_PRIMERA_LECTURA * 86400
     ids = lector.mensajes_nuevos(max(0, punto_actual - MARGEN_SEGUNDOS))
@@ -64,7 +68,7 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
 
 def ciclo_correo():
     tenants = tenants_con_correo()
-    log.info("Ciclo de correo: %d gestorías con Gmail y OneDrive conectados", len(tenants))
+    log.info("Ciclo de correo: %d gestorías con Gmail y almacenamiento conectados", len(tenants))
     for tenant_id in tenants:
         try:
             _procesar_tenant(tenant_id)

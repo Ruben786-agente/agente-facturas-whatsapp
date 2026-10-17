@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Acciones del panel sobre lo pendiente: abrir la carpeta en OneDrive, marcar como revisado,
+Acciones del panel sobre lo pendiente: abrir la carpeta en OneDrive o Google Drive, marcar como revisado,
 y corregir a mano una factura en Revisión para añadirla al Excel.
 """
 
@@ -8,9 +8,8 @@ import logging
 
 from flask import Blueprint, request, redirect, session, render_template_string, url_for, flash
 
-from almacenamiento import obtener_almacenamiento
-from autenticacion_onedrive import refrescar_token as refrescar_token_ms
-from basededatos import (marcar_revisada, obtener_carpeta_sin_identificar, obtener_refresh_token,
+from almacenamiento_tenant import storage_para_tenant
+from basededatos import (marcar_revisada, obtener_carpeta_sin_identificar,
                          obtener_revision, resolver_sin_identificar)
 from panel_web import login_requerido
 from procesamiento import reprocesar_revision
@@ -22,10 +21,7 @@ FILAS_DESGLOSE = 4
 
 
 def _storage(tenant_id):
-    refresh = obtener_refresh_token(tenant_id, "onedrive")
-    if not refresh:
-        return None
-    return obtener_almacenamiento("onedrive", access_token=refrescar_token_ms(refresh)["access_token"])
+    return storage_para_tenant(tenant_id)
 
 
 def _numero(texto):
@@ -62,11 +58,11 @@ def _abrir(enlace_fn):
     try:
         storage = _storage(session["tenant_id"])
         if not storage:
-            raise RuntimeError("OneDrive no está conectado")
+            raise RuntimeError("No hay almacenamiento conectado")
         return redirect(enlace_fn(storage))
     except Exception:
         log.exception("No se pudo abrir el enlace de OneDrive")
-        flash("No se ha podido abrir OneDrive. Puede que la carpeta ya no exista.")
+        flash("No se ha podido abrir la carpeta. Puede que ya no exista o que haya que volver a conectar el almacenamiento.")
         return redirect(url_for("panel.panel"))
 
 
@@ -120,7 +116,7 @@ PLANTILLA_CORREGIR = """
 </style></head><body>
 <div class="caja">
   <p><a href="{{ url_for('panel.panel') }}">&larr; Volver al panel</a> ·
-     <a href="{{ url_for('revision.abrir_revision', factura_id=factura_id) }}" target="_blank">Ver el original en OneDrive</a></p>
+     <a href="{{ url_for('revision.abrir_revision', factura_id=factura_id) }}" target="_blank">Ver el original</a></p>
   <h2>Corregir factura de {{ empresa }}</h2>
   <p class="motivo">Motivo de la revisión: <strong>{{ motivo }}</strong></p>
   {% if error %}<p class="error">Sigue sin poder añadirse: <strong>{{ error }}</strong>. Revisa los importes.</p>{% endif %}
@@ -211,7 +207,7 @@ def corregir(factura_id):
             valores = _valores_formulario(nueva)
             storage = _storage(tenant_id)
             if not storage:
-                raise RuntimeError("OneDrive no está conectado")
+                raise RuntimeError("No hay almacenamiento conectado")
             res = reprocesar_revision(storage, tenant_id, factura_id, nueva)
             if res["accion"] == "procesada":
                 flash("Factura añadida al Excel.")
@@ -224,7 +220,7 @@ def corregir(factura_id):
             error = str(e) or "revisa que los números estén bien escritos"
         except Exception:
             log.exception("Fallo corrigiendo la factura %s", factura_id)
-            error = "ha habido un problema al guardar en OneDrive; inténtalo de nuevo"
+            error = "ha habido un problema al guardar en tu almacenamiento; inténtalo de nuevo"
 
     return render_template_string(PLANTILLA_CORREGIR, factura_id=factura_id, empresa=r["empresa"]["nombre"],
                                   motivo=r["motivo"] or "-", v=valores, error=error)

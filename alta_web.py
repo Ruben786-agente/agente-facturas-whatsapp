@@ -2,7 +2,7 @@
 """
 Alta de una gestoría nueva y conexión de sus cuentas:
   /registro      -> crea la gestoría (prueba gratuita de 14 días) y su contraseña
-  /conexiones    -> conectar OneDrive y Gmail, y suscribirse
+  /conexiones    -> conectar OneDrive o Google Drive, Gmail, y suscribirse
   callbacks      -> donde Microsoft y Google devuelven a la gestoría tras autorizar
 """
 
@@ -44,7 +44,7 @@ PLANTILLA_REGISTRO = ESTILO + """
 <!doctype html><html lang="es"><head><meta charset="utf-8"><title>Crear cuenta - Agente Facturas</title></head><body>
 <div class="caja">
   <h2>Prueba gratis 14 días</h2>
-  <p>Sin tarjeta. Solo necesitas tu cuenta de OneDrive y tu Gmail.</p>
+  <p>Sin tarjeta. Solo necesitas tu cuenta de OneDrive o de Google Drive, y tu Gmail.</p>
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <form method="post">
     <label>Nombre de la gestoría</label><input name="nombre" required>
@@ -64,9 +64,15 @@ PLANTILLA_CONEXIONES = ESTILO + """
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
   <div class="paso">
-    <b>1. OneDrive</b> (donde se guardan facturas y Excel)<br>
-    {% if e.onedrive %}<span class="ok">✔ Conectado</span> {{ e.onedrive_cuenta or "" }}
-    {% else %}<a class="boton" href="{{ url_for('alta.conectar_onedrive') }}">Conectar OneDrive</a>{% endif %}
+    <b>1. Dónde guardar facturas y Excel</b> (elige OneDrive o Google Drive)<br>
+    {% if e.almacenamiento == "onedrive" %}<span class="ok">✔ OneDrive conectado</span> {{ e.onedrive_cuenta or "" }}
+    {% elif e.almacenamiento == "gdrive" %}
+      <span class="ok">✔ Google Drive conectado</span> {{ e.gdrive_cuenta or "" }}
+      <a class="boton gris" href="{{ url_for('alta.conectar_gdrive') }}">Volver a autorizar</a>
+    {% else %}
+      <a class="boton" href="{{ url_for('alta.conectar_onedrive') }}">Conectar OneDrive</a>
+      <a class="boton" href="{{ url_for('alta.conectar_gdrive') }}">Conectar Google Drive</a>
+    {% endif %}
   </div>
 
   <div class="paso">
@@ -133,6 +139,8 @@ def conexiones():
 @bp_alta.route("/onboarding/onedrive")
 @login_requerido
 def conectar_onedrive():
+    if obtener_estado_conexiones(session["tenant_id"])["gdrive"]:
+        return redirect(url_for("alta.conexiones", error="Ya tienes Google Drive conectado. Solo se puede usar un almacenamiento."))
     session["state_ms"] = secrets.token_urlsafe(24)
     return redirect(microsoft.generar_url_autorizacion(session["state_ms"]))
 
@@ -161,19 +169,43 @@ bp_alta.add_url_rule(_ruta_callback_microsoft(), "callback_onedrive", callback_o
 @login_requerido
 def conectar_gmail():
     session["state_g"] = secrets.token_urlsafe(24)
+    session["google_proposito"] = "gmail"
     return redirect(google.generar_url_autorizacion(session["state_g"]))
+
+
+@bp_alta.route("/onboarding/gdrive")
+@login_requerido
+def conectar_gdrive():
+    if obtener_estado_conexiones(session["tenant_id"])["onedrive"]:
+        return redirect(url_for("alta.conexiones", error="Ya tienes OneDrive conectado. Solo se puede usar un almacenamiento."))
+    session["state_g"] = secrets.token_urlsafe(24)
+    session["google_proposito"] = "gdrive"  # vuelve por la misma dirección que Gmail
+    return redirect(google.generar_url_autorizacion(session["state_g"], scopes=google.SCOPES_DRIVE))
+
+
+def _callback_gdrive(token):
+    tenant_id = session["tenant_id"]
+    datos = requests.get("https://www.googleapis.com/drive/v3/about", params={"fields": "user(emailAddress)"},
+                         headers={"Authorization": f"Bearer {token['access_token']}"}, timeout=30).json()
+    guardar_credencial(tenant_id, "gdrive", token["refresh_token"], (datos.get("user") or {}).get("emailAddress"))
+    preparar_gestoria(obtener_almacenamiento("gdrive", access_token=token["access_token"]), tenant_id)
 
 
 @bp_alta.route("/onboarding/gmail/callback")
 def callback_gmail():
     if "tenant_id" not in session:
         return redirect(url_for("panel.login"))
+    proposito = session.get("google_proposito", "gmail")
+    nombre = "Google Drive" if proposito == "gdrive" else "Gmail"
     if request.args.get("error") or request.args.get("state") != session.get("state_g"):
-        return redirect(url_for("alta.conexiones", error="No se pudo conectar Gmail. Inténtalo de nuevo."))
+        return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtalo de nuevo."))
     try:
         token = google.procesar_callback(request.args["code"])
         if "refresh_token" not in token:
             raise ValueError("Google no devolvió refresh token")
+        if proposito == "gdrive":
+            _callback_gdrive(token)
+            return redirect(url_for("alta.conexiones", ok="Google Drive conectado."))
         perfil = requests.get("https://gmail.googleapis.com/gmail/v1/users/me/profile",
                               headers={"Authorization": f"Bearer {token['access_token']}"}, timeout=30).json()
         tenant_id = session["tenant_id"]
@@ -181,8 +213,8 @@ def callback_gmail():
         from basededatos import guardar_estado_correo
         guardar_estado_correo(tenant_id, error=None)  # limpia el aviso "Gmail desconectado"
     except Exception:
-        log.exception("Fallo conectando Gmail")
-        return redirect(url_for("alta.conexiones", error="No se pudo conectar Gmail. Inténtalo de nuevo."))
+        log.exception("Fallo conectando %s", nombre)
+        return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtalo de nuevo."))
     return redirect(url_for("alta.conexiones", ok="Gmail conectado."))
 
 

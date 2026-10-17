@@ -158,8 +158,128 @@ class OneDriveStorage(AlmacenamientoDocumentos):
         return resp.json()
 
 
+class GoogleDriveStorage(AlmacenamientoDocumentos):
+    """
+    Google Drive con el permiso 'drive.file': el agente solo ve las carpetas y archivos que
+    él mismo crea (la carpeta "Agente Facturas" y lo de dentro), no el resto del Drive.
+    """
+    API = "https://www.googleapis.com/drive/v3"
+    API_SUBIDA = "https://www.googleapis.com/upload/drive/v3"
+    TIPO_CARPETA = "application/vnd.google-apps.folder"
+    TIPOS = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+             ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+
+    def __init__(self, access_token: str, http=None):
+        self.access_token = access_token
+        self._http = http or requests
+
+    def _headers(self, extra=None):
+        return {"Authorization": f"Bearer {self.access_token}", **(extra or {})}
+
+    @staticmethod
+    def _q(texto):
+        return texto.replace("\\", "\\\\").replace("'", "\\'")
+
+    def _archivo(self, item, carpeta_id):
+        return ArchivoRemoto(id=item["id"], nombre=item["name"], carpeta_id=carpeta_id,
+                             tamano_bytes=int(item.get("size") or 0), fecha_modificacion=item.get("modifiedTime", ""))
+
+    def _listar(self, q, campos="files(id,name,size,modifiedTime)"):
+        resp = self._http.get(f"{self.API}/files", headers=self._headers(),
+                              params={"q": q, "fields": campos, "pageSize": 100, "spaces": "drive"})
+        resp.raise_for_status()
+        return resp.json().get("files", [])
+
+    def _comprobar_carpeta(self, carpeta_id):
+        """Si la carpeta no existe o está en la papelera, falla como un 404 (así se vuelve a crear)."""
+        if carpeta_id == "root":
+            return
+        resp = self._http.get(f"{self.API}/files/{carpeta_id}", headers=self._headers(), params={"fields": "trashed"})
+        if resp.status_code == 200 and resp.json().get("trashed"):
+            falsa = requests.Response()
+            falsa.status_code = 404
+            raise requests.HTTPError("La carpeta está en la papelera de Google Drive", response=falsa)
+        resp.raise_for_status()
+
+    def listar_archivos_nuevos(self, carpeta_id, desde=None):
+        q = f"'{carpeta_id}' in parents and trashed=false and mimeType != '{self.TIPO_CARPETA}'"
+        if desde:
+            q += f" and modifiedTime > '{desde}'"
+        return [self._archivo(i, carpeta_id) for i in self._listar(q)]
+
+    def descargar_archivo(self, archivo_id):
+        resp = self._http.get(f"{self.API}/files/{archivo_id}", headers=self._headers(), params={"alt": "media"})
+        resp.raise_for_status()
+        return resp.content
+
+    def mover_o_renombrar(self, archivo_id, carpeta_destino_id=None, nuevo_nombre=None):
+        params, body = {}, {}
+        if carpeta_destino_id:
+            actual = self._http.get(f"{self.API}/files/{archivo_id}", headers=self._headers(), params={"fields": "parents"})
+            actual.raise_for_status()
+            params["addParents"] = carpeta_destino_id
+            params["removeParents"] = ",".join(actual.json().get("parents", []))
+        if nuevo_nombre:
+            body["name"] = nuevo_nombre
+        if not params and not body:
+            return
+        resp = self._http.patch(f"{self.API}/files/{archivo_id}", headers=self._headers(), params=params, json=body)
+        resp.raise_for_status()
+
+    def subir_archivo(self, carpeta_id, nombre, contenido):
+        import json
+        import os
+        self._comprobar_carpeta(carpeta_id)
+        tipo = self.TIPOS.get(os.path.splitext(nombre)[1].lower(), "application/octet-stream")
+        existente = self.buscar_archivo_por_nombre(carpeta_id, nombre)
+        if existente:  # mismo nombre: se sustituye el contenido, como en OneDrive
+            resp = self._http.patch(f"{self.API_SUBIDA}/files/{existente.id}", headers=self._headers({"Content-Type": tipo}),
+                                    params={"uploadType": "media", "fields": "id,name,size,modifiedTime"}, data=contenido)
+        else:
+            marca = "agente_facturas_limite"
+            meta = json.dumps({"name": nombre, "parents": [carpeta_id]}).encode("utf-8")
+            cuerpo = (f"--{marca}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode() + meta +
+                      f"\r\n--{marca}\r\nContent-Type: {tipo}\r\n\r\n".encode() + contenido + f"\r\n--{marca}--".encode())
+            resp = self._http.post(f"{self.API_SUBIDA}/files", params={"uploadType": "multipart", "fields": "id,name,size,modifiedTime"},
+                                   headers=self._headers({"Content-Type": f"multipart/related; boundary={marca}"}), data=cuerpo)
+        resp.raise_for_status()
+        return self._archivo(resp.json(), carpeta_id)
+
+    def buscar_archivo_por_nombre(self, carpeta_id, nombre):
+        q = f"'{carpeta_id}' in parents and name='{self._q(nombre)}' and trashed=false and mimeType != '{self.TIPO_CARPETA}'"
+        encontrados = self._listar(q)
+        return self._archivo(encontrados[0], carpeta_id) if encontrados else None
+
+    def crear_carpeta(self, carpeta_padre_id, nombre):
+        """Idempotente: si ya hay una carpeta con ese nombre dentro de la otra, devuelve la existente."""
+        q = f"'{carpeta_padre_id}' in parents and name='{self._q(nombre)}' and trashed=false and mimeType='{self.TIPO_CARPETA}'"
+        encontradas = self._listar(q, campos="files(id)")
+        if encontradas:
+            return encontradas[0]["id"]
+        resp = self._http.post(f"{self.API}/files", headers=self._headers(), params={"fields": "id"},
+                               json={"name": nombre, "mimeType": self.TIPO_CARPETA, "parents": [carpeta_padre_id]})
+        resp.raise_for_status()
+        return resp.json()["id"]
+
+    def crear_enlace_subida(self, carpeta_id):
+        return None  # con el permiso drive.file no se pueden crear enlaces de subida anónimos
+
+    def crear_suscripcion_cambios(self, carpeta_id, url_webhook):
+        raise NotImplementedError("Google Drive no usa suscripciones de cambios; se revisa por sondeo")
+
+    def eliminar_archivo(self, archivo_id):
+        resp = self._http.patch(f"{self.API}/files/{archivo_id}", headers=self._headers(), json={"trashed": True})
+        if resp.status_code != 404:
+            resp.raise_for_status()
+
+    def obtener_enlace(self, elemento_id):
+        resp = self._http.get(f"{self.API}/files/{elemento_id}", headers=self._headers(), params={"fields": "webViewLink"})
+        resp.raise_for_status()
+        return resp.json()["webViewLink"]
+
+
 def obtener_almacenamiento(proveedor: str, **kwargs) -> AlmacenamientoDocumentos:
-    proveedores = {"onedrive": OneDriveStorage}
+    proveedores = {"onedrive": OneDriveStorage, "gdrive": GoogleDriveStorage}
     if proveedor not in proveedores:
         raise ValueError(f"Proveedor de almacenamiento '{proveedor}' no soportado todavía. Disponibles: {list(proveedores.keys())}")
     return proveedores[proveedor](**kwargs)

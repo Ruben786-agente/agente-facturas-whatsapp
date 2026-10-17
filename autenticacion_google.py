@@ -5,7 +5,8 @@ from urllib.parse import urlencode
 
 import requests
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]  # Gmail: solo lectura
+SCOPES_DRIVE = ["https://www.googleapis.com/auth/drive.file"]  # Drive: solo lo que crea el agente
 URL_AUTORIZACION = "https://accounts.google.com/o/oauth2/v2/auth"
 URL_TOKEN = "https://oauth2.googleapis.com/token"
 
@@ -22,11 +23,11 @@ def _config():
     }
 
 
-def generar_url_autorizacion(state: str) -> str:
+def generar_url_autorizacion(state: str, scopes=None) -> str:
     cfg = _config()
     params = {
         "client_id": cfg["client_id"], "redirect_uri": cfg["redirect_uri"], "response_type": "code",
-        "scope": " ".join(SCOPES), "state": state,
+        "scope": " ".join(scopes or SCOPES), "state": state,
         "access_type": "offline",   # para recibir refresh token
         "prompt": "consent",        # fuerza a devolver refresh token siempre
     }
@@ -45,7 +46,7 @@ def procesar_callback(code: str) -> dict:
     return datos
 
 
-def refrescar_token(refresh_token: str) -> dict:
+def refrescar_token(refresh_token: str, servicio: str = "Gmail") -> dict:
     cfg = _config()
     r = requests.post(URL_TOKEN, data={
         "refresh_token": refresh_token, "client_id": cfg["client_id"],
@@ -54,6 +55,6 @@ def refrescar_token(refresh_token: str) -> dict:
     datos = r.json()
     if r.status_code != 200 or "error" in datos:
         if datos.get("error") == "invalid_grant":
-            raise ErrorAutorizacionGoogle("Gmail desconectado: hay que volver a autorizar el acceso")
-        raise ErrorAutorizacionGoogle(f"No se pudo renovar el acceso a Gmail: {datos.get('error_description', datos.get('error'))}")
+            raise ErrorAutorizacionGoogle(f"{servicio} desconectado: hay que volver a autorizar el acceso")
+        raise ErrorAutorizacionGoogle(f"No se pudo renovar el acceso a {servicio}: {datos.get('error_description', datos.get('error'))}")
     return datos
