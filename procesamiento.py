@@ -26,7 +26,8 @@ import requests
 from datetime import datetime
 
 from basededatos import (
-    crear_aviso, eliminar_factura_cache, marcar_revisada, obtener_revision, registrar_sin_identificar,
+    crear_aviso, documento_ya_visto, eliminar_factura_cache, marcar_documento_visto, marcar_revisada,
+    obtener_revision, registrar_sin_identificar,
     guardar_factura_procesada, obtener_carpeta_sin_identificar,
     obtener_facturas_ya_registradas, resolver_empresa_cliente_por_cif,
 )
@@ -256,6 +257,21 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
     return _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura)
 
 
+def _huella(contenido):
+    return hashlib.sha256(contenido).hexdigest()
+
+
+def _procesar_sin_repetir(storage, tenant_id, contenido, nombre_original, extraer=None):
+    """Como procesar_documento, pero si este mismo archivo se leyó hace poco no vuelve a gastar IA."""
+    huella = _huella(contenido)
+    if documento_ya_visto(tenant_id, huella):
+        log.info("'%s': ya leído hace poco, se salta", nombre_original)
+        return {"accion": "ya_visto"}
+    res = procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=extraer)
+    marcar_documento_visto(tenant_id, huella)
+    return res
+
+
 def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=None, dividir=None):
     """
     Punto de entrada para los canales (correo, OneDrive, WhatsApp). Si el archivo es un PDF
@@ -269,7 +285,7 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
 
     total = dividir_pdf.contar_paginas(contenido) if contenido[:4] == b"%PDF" else 0
     if total <= 1:
-        return [procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=extraer)]
+        return [_procesar_sin_repetir(storage, tenant_id, contenido, nombre_original, extraer)]
     if total > dividir_pdf.MAX_PAGINAS:
         log.warning("PDF de %d páginas, demasiado largo para dividir; va a Sin identificar", total)
         return [_sin_identificar(storage, tenant_id, nombre_original, contenido,
@@ -285,7 +301,14 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
         rango = f"p{grupo[0]}" if len(grupo) == 1 else f"p{grupo[0]}-{grupo[-1]}"
         nombre_parte = f"{base}_{rango}.pdf"
         try:
+            huella = _huella(parte)
+            if documento_ya_visto(tenant_id, huella):  # reintento de un correo: esta parte ya se leyó
+                log.info("'%s' %s: ya leída hace poco, se salta", nombre_original, rango)
+                resultados.append({"accion": "ya_visto"})
+                continue
             res = procesar_documento(storage, tenant_id, parte, nombre_parte, extraer=extraer, diferir_dudosas=True)
+            if res.get("accion") != "en_espera":
+                marcar_documento_visto(tenant_id, huella)
         except Exception as e:
             log.exception("Fallo procesando %s de '%s'", rango, nombre_original)
             primer_error = primer_error or e
@@ -309,6 +332,7 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
         try:
             resultados[posicion] = _archivar_con_reparacion(storage, tenant_id, parte, nombre_parte, factura,
                                                             forzar_revision=forzar)
+            marcar_documento_visto(tenant_id, _huella(parte))
         except Exception as e:
             log.exception("Fallo en la segunda vuelta de %s", nombre_parte)
             primer_error = primer_error or e

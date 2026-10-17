@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     create_engine, Column, String, Boolean, DateTime, Numeric, Date, LargeBinary, ForeignKey,
-    BigInteger, UniqueConstraint, Text
+    BigInteger, UniqueConstraint, Text, Integer
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import uuid
@@ -106,6 +106,28 @@ class CorreoProcesado(Base):
     tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), nullable=False)
     mensaje_id = Column(String, nullable=False)
     procesado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CorreoIntento(Base):
+    """Cuántas veces ha fallado un correo, para no reintentarlo eternamente."""
+    __tablename__ = "correo_intentos"
+    __table_args__ = (UniqueConstraint("tenant_id", "mensaje_id", name="uq_intento_tenant_mensaje"),)
+    id = _uuid_column()
+    tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), nullable=False)
+    mensaje_id = Column(String, nullable=False)
+    intentos = Column(Integer, nullable=False, default=0)
+    ultimo_error = Column(String)
+    actualizado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class DocumentoVisto(Base):
+    """Huella de un documento ya leído: si el correo se reintenta, no se vuelve a pagar a la IA por él."""
+    __tablename__ = "documentos_vistos"
+    __table_args__ = (UniqueConstraint("tenant_id", "huella", name="uq_visto_tenant_huella"),)
+    id = _uuid_column()
+    tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), nullable=False)
+    huella = Column(String, nullable=False)
+    visto_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 class EstadoCorreo(Base):
@@ -458,6 +480,49 @@ def guardar_estado_correo(tenant_id, ultimo_mensaje_ts=None, error=None):
             e.ultimo_mensaje_ts = ultimo_mensaje_ts
         e.error = error
         e.actualizado_en = datetime.now(timezone.utc)
+        session.commit()
+    finally:
+        session.close()
+
+
+def registrar_intento_fallido(tenant_id, mensaje_id, error=""):
+    """Suma un intento fallido a este correo y devuelve cuántos lleva."""
+    session = _obtener_session()
+    try:
+        r = session.query(CorreoIntento).filter_by(tenant_id=tenant_id, mensaje_id=mensaje_id).first()
+        if r is None:
+            r = CorreoIntento(tenant_id=tenant_id, mensaje_id=mensaje_id, intentos=0)
+            session.add(r)
+        r.intentos = (r.intentos or 0) + 1
+        r.ultimo_error = (error or "")[:300]
+        r.actualizado_en = datetime.now(timezone.utc)
+        session.commit()
+        return r.intentos
+    finally:
+        session.close()
+
+
+VENTANA_DOCUMENTO_VISTO = timedelta(days=2)
+
+
+def documento_ya_visto(tenant_id, huella):
+    """True si este mismo documento se leyó hace poco (solo vale para evitar repeticiones en reintentos)."""
+    session = _obtener_session()
+    try:
+        r = session.query(DocumentoVisto).filter_by(tenant_id=tenant_id, huella=huella).first()
+        return bool(r and r.visto_en and _como_aware_utc(r.visto_en) > datetime.now(timezone.utc) - VENTANA_DOCUMENTO_VISTO)
+    finally:
+        session.close()
+
+
+def marcar_documento_visto(tenant_id, huella):
+    session = _obtener_session()
+    try:
+        r = session.query(DocumentoVisto).filter_by(tenant_id=tenant_id, huella=huella).first()
+        if r is None:
+            session.add(DocumentoVisto(tenant_id=tenant_id, huella=huella))
+        else:
+            r.visto_en = datetime.now(timezone.utc)
         session.commit()
     finally:
         session.close()

@@ -6,7 +6,7 @@ import time
 from autenticacion_google import ErrorAutorizacionGoogle, refrescar_token as refrescar_token_google
 from almacenamiento_tenant import storage_para_tenant
 from basededatos import (correo_ya_procesado, crear_aviso, guardar_estado_correo, marcar_correo_procesado,
-                         obtener_estado_correo, obtener_refresh_token, tenants_con_correo)
+                         obtener_estado_correo, obtener_refresh_token, registrar_intento_fallido, tenants_con_correo)
 from lector_gmail import LectorGmail
 from procesamiento import procesar_archivo
 
@@ -15,6 +15,7 @@ log = logging.getLogger("sondeo_correo")
 INTERVALO_SEGUNDOS = 5 * 60
 DIAS_PRIMERA_LECTURA = 3
 MARGEN_SEGUNDOS = 3600
+MAX_INTENTOS = 3  # un correo que falla 3 veces se aparta y se avisa, para no gastar IA sin fin
 
 
 def _procesar_tenant(tenant_id, lector=None, storage=None):
@@ -55,10 +56,20 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
                 log.info("Correo %s: '%s' -> %s", tenant_id, nombre, [(r or {}).get("accion") for r in resultados])
             marcar_correo_procesado(tenant_id, mensaje_id)
             max_ok = max(max_ok or 0, fecha)
-        except Exception:
-            log.exception("Fallo procesando correo %s (se reintentará)", mensaje_id)
+        except Exception as e:
+            intentos = registrar_intento_fallido(tenant_id, mensaje_id, f"{type(e).__name__}: {e}")
             f = fecha or punto_actual
-            primer_fallo = f if primer_fallo is None else min(primer_fallo, f)
+            if intentos >= MAX_INTENTOS:
+                log.exception("Correo %s: falló %d veces; se aparta y se avisa a la gestoría", mensaje_id, intentos)
+                crear_aviso(tenant_id, "correo_fallido",
+                            "No se ha podido procesar un correo después de 3 intentos y se ha dejado de reintentar. "
+                            "Revisa en tu Gmail el correo con facturas de esa fecha y súbelas a mano si hace falta. "
+                            f"({type(e).__name__})")
+                marcar_correo_procesado(tenant_id, mensaje_id)
+                max_ok = max(max_ok or 0, f)
+            else:
+                log.exception("Fallo procesando correo %s (intento %d de %d)", mensaje_id, intentos, MAX_INTENTOS)
+                primer_fallo = f if primer_fallo is None else min(primer_fallo, f)
 
     candidato = max_ok if max_ok is not None else punto_actual
     if primer_fallo is not None:
