@@ -114,31 +114,19 @@ def _respuesta_por_defecto(motivo: str) -> dict:
     }
 
 
-_SIN_TEMPERATURA = False  # se activa si el modelo no admite fijar la temperatura
-
-
-def _llamar_api(bloque, temperatura):
+def _llamar_api(bloque):
     """Una llamada a la IA. Devuelve (texto, stop_reason)."""
-    global _SIN_TEMPERATURA
     cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    args = dict(model=MODELO, max_tokens=4000, system=PROMPT, messages=[{"role": "user", "content": [
-        bloque, {"type": "text", "text": "Extrae los datos de este documento según las instrucciones."},
-    ]}])
-    if not _SIN_TEMPERATURA:
-        args["temperature"] = temperatura
-    try:
-        respuesta = cliente.messages.create(**args)
-    except anthropic.BadRequestError as e:
-        if "temperature" not in str(e).lower() or _SIN_TEMPERATURA:
-            raise
-        log.warning("El modelo no admite fijar la temperatura; se usa la de por defecto")
-        _SIN_TEMPERATURA = True
-        args.pop("temperature", None)
-        respuesta = cliente.messages.create(**args)
+    respuesta = cliente.messages.create(
+        model=MODELO, max_tokens=4000, system=PROMPT,
+        messages=[{"role": "user", "content": [
+            bloque, {"type": "text", "text": "Extrae los datos de este documento según las instrucciones."},
+        ]}],
+    )
     return "".join(b.text for b in respuesta.content if b.type == "text"), respuesta.stop_reason
 
 
-def _leer(contenido: bytes, temperatura: float) -> dict:
+def _leer(contenido: bytes) -> dict:
     media_type = _detectar_media_type(contenido)
     datos_b64 = base64.b64encode(contenido).decode()
     if media_type == "application/pdf":
@@ -147,7 +135,7 @@ def _leer(contenido: bytes, temperatura: float) -> dict:
         bloque = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": datos_b64}}
 
     try:
-        texto, motivo_parada = _llamar_api(bloque, temperatura)
+        texto, motivo_parada = _llamar_api(bloque)
         if motivo_parada == "max_tokens":
             log.warning("La respuesta de la IA se cortó por longitud")
         try:
@@ -198,16 +186,15 @@ def _coinciden(a: dict, b: dict) -> bool:
 
 def extraer_factura(contenido: bytes) -> dict:
     """
-    Lee el documento con la IA. La primera lectura va con temperatura 0 (la más estable). Si sale
-    con confianza 'baja' se lee una segunda vez; si la segunda ya no sale 'baja' y coincide con la
+    Lee el documento con la IA. Si sale con confianza 'baja' se lee una segunda vez; si la segunda ya no sale 'baja' y coincide con la
     primera en número, fecha, total y CIF, se acepta (dos lecturas independientes que dicen lo
     mismo). Si no, se queda como estaba: 'baja' y a Revisión.
     """
-    primera = _leer(contenido, 0)
+    primera = _leer(contenido)
     if primera.get("es_documento_fiscal") is False or primera.get("confianza") != "baja":
         return primera
 
-    segunda = _leer(contenido, 1.0)
+    segunda = _leer(contenido)
     if segunda.get("es_documento_fiscal") is False or segunda.get("confianza") == "baja":
         log.info("Segunda lectura: sigue con confianza baja, va a Revisión")
         return primera

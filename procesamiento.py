@@ -197,7 +197,10 @@ def procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=N
     factura = (extraer or extraer_factura)(contenido)
     if not factura.get("es_documento_fiscal", True):
         return {"accion": "ignorado"}
-    return _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, factura, diferir_dudosas)
+    res = _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, factura, diferir_dudosas)
+    if factura.get("_lectura_fallida"):
+        res = {**res, "lectura_fallida": True}  # no se pudo leer: no debe darse por "visto"
+    return res
 
 
 def _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, factura, diferir=False, forzar_revision=None):
@@ -268,7 +271,8 @@ def _procesar_sin_repetir(storage, tenant_id, contenido, nombre_original, extrae
         log.info("'%s': ya leído hace poco, se salta", nombre_original)
         return {"accion": "ya_visto"}
     res = procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=extraer)
-    marcar_documento_visto(tenant_id, huella)
+    if not res.get("lectura_fallida"):
+        marcar_documento_visto(tenant_id, huella)
     return res
 
 
@@ -307,7 +311,7 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
                 resultados.append({"accion": "ya_visto"})
                 continue
             res = procesar_documento(storage, tenant_id, parte, nombre_parte, extraer=extraer, diferir_dudosas=True)
-            if res.get("accion") != "en_espera":
+            if res.get("accion") != "en_espera" and not res.get("lectura_fallida"):
                 marcar_documento_visto(tenant_id, huella)
         except Exception as e:
             log.exception("Fallo procesando %s de '%s'", rango, nombre_original)
@@ -332,7 +336,8 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
         try:
             resultados[posicion] = _archivar_con_reparacion(storage, tenant_id, parte, nombre_parte, factura,
                                                             forzar_revision=forzar)
-            marcar_documento_visto(tenant_id, _huella(parte))
+            if not factura.get("_lectura_fallida"):
+                marcar_documento_visto(tenant_id, _huella(parte))
         except Exception as e:
             log.exception("Fallo en la segunda vuelta de %s", nombre_parte)
             primer_error = primer_error or e
