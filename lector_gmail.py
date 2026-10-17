@@ -24,10 +24,10 @@ class LectorGmail:
         return r.json()
 
     def mensajes_nuevos(self, desde_ts, maximo=200):
-        """IDs de correos con adjunto posteriores a desde_ts (segundos epoch)."""
+        """IDs de correos RECIBIDOS con adjunto posteriores a desde_ts (segundos epoch). Se ignoran los enviados por la propia cuenta y los borradores."""
         ids, token = [], None
         while len(ids) < maximo:
-            params = {"q": f"has:attachment after:{int(desde_ts)}", "maxResults": min(100, maximo - len(ids))}
+            params = {"q": f"has:attachment -in:sent -in:drafts -from:me after:{int(desde_ts)}", "maxResults": min(100, maximo - len(ids))}
             if token:
                 params["pageToken"] = token
             datos = self._get("/messages", **params)

@@ -110,10 +110,35 @@ def _respuesta_por_defecto(motivo: str) -> dict:
                        "cuota_recargo": None, "pct_retencion": None, "cuota_retencion": None}],
         "total_factura": 0, "confianza": "baja",
         "es_factura_simplificada": False, "sin_cif_destinatario": True, "formato_ticket_tpv": False,
+        "_lectura_fallida": True,
     }
 
 
-def extraer_factura(contenido: bytes) -> dict:
+_SIN_TEMPERATURA = False  # se activa si el modelo no admite fijar la temperatura
+
+
+def _llamar_api(bloque, temperatura):
+    """Una llamada a la IA. Devuelve (texto, stop_reason)."""
+    global _SIN_TEMPERATURA
+    cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    args = dict(model=MODELO, max_tokens=4000, system=PROMPT, messages=[{"role": "user", "content": [
+        bloque, {"type": "text", "text": "Extrae los datos de este documento según las instrucciones."},
+    ]}])
+    if not _SIN_TEMPERATURA:
+        args["temperature"] = temperatura
+    try:
+        respuesta = cliente.messages.create(**args)
+    except anthropic.BadRequestError as e:
+        if "temperature" not in str(e).lower() or _SIN_TEMPERATURA:
+            raise
+        log.warning("El modelo no admite fijar la temperatura; se usa la de por defecto")
+        _SIN_TEMPERATURA = True
+        args.pop("temperature", None)
+        respuesta = cliente.messages.create(**args)
+    return "".join(b.text for b in respuesta.content if b.type == "text"), respuesta.stop_reason
+
+
+def _leer(contenido: bytes, temperatura: float) -> dict:
     media_type = _detectar_media_type(contenido)
     datos_b64 = base64.b64encode(contenido).decode()
     if media_type == "application/pdf":
@@ -122,15 +147,8 @@ def extraer_factura(contenido: bytes) -> dict:
         bloque = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": datos_b64}}
 
     try:
-        cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        respuesta = cliente.messages.create(
-            model=MODELO, max_tokens=4000, system=PROMPT,
-            messages=[{"role": "user", "content": [
-                bloque, {"type": "text", "text": "Extrae los datos de este documento según las instrucciones."},
-            ]}],
-        )
-        texto = "".join(b.text for b in respuesta.content if b.type == "text")
-        if respuesta.stop_reason == "max_tokens":
+        texto, motivo_parada = _llamar_api(bloque, temperatura)
+        if motivo_parada == "max_tokens":
             log.warning("La respuesta de la IA se cortó por longitud")
         try:
             datos = _extraer_json(texto)
@@ -158,6 +176,49 @@ def extraer_factura(contenido: bytes) -> dict:
         return _respuesta_por_defecto(f"error de la API de Claude: {e}")
     except Exception as e:
         return _respuesta_por_defecto(f"error inesperado: {e}")
+
+
+def _cif(x):
+    return re.sub(r"[\s.\-]", "", (x or "")).upper()
+
+
+def _coinciden(a: dict, b: dict) -> bool:
+    """Dos lecturas independientes dicen lo mismo en lo que importa: número, fecha, total y los dos CIF."""
+    try:
+        return (
+            (a.get("num_factura") or "").strip().upper() == (b.get("num_factura") or "").strip().upper()
+            and (a.get("fecha_factura") or "").strip() == (b.get("fecha_factura") or "").strip()
+            and abs(float(a.get("total_factura") or 0) - float(b.get("total_factura") or 0)) <= 0.01
+            and _cif((a.get("emisor") or {}).get("cif_nif")) == _cif((b.get("emisor") or {}).get("cif_nif"))
+            and _cif((a.get("destinatario") or {}).get("cif_nif")) == _cif((b.get("destinatario") or {}).get("cif_nif"))
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def extraer_factura(contenido: bytes) -> dict:
+    """
+    Lee el documento con la IA. La primera lectura va con temperatura 0 (la más estable). Si sale
+    con confianza 'baja' se lee una segunda vez; si la segunda ya no sale 'baja' y coincide con la
+    primera en número, fecha, total y CIF, se acepta (dos lecturas independientes que dicen lo
+    mismo). Si no, se queda como estaba: 'baja' y a Revisión.
+    """
+    primera = _leer(contenido, 0)
+    if primera.get("es_documento_fiscal") is False or primera.get("confianza") != "baja":
+        return primera
+
+    segunda = _leer(contenido, 1.0)
+    if segunda.get("es_documento_fiscal") is False or segunda.get("confianza") == "baja":
+        log.info("Segunda lectura: sigue con confianza baja, va a Revisión")
+        return primera
+    if primera.get("_lectura_fallida"):  # la primera no llegó a leerse (fallo puntual): vale la segunda
+        log.info("Segunda lectura: la primera falló y la segunda es válida")
+        return {**segunda, "relectura": "tras_fallo"}
+    if _coinciden(primera, segunda):
+        log.info("Segunda lectura: coincide con la primera, se acepta")
+        return {**segunda, "confianza": "media", "relectura": "confirmada"}
+    log.info("Segunda lectura: no coincide con la primera, va a Revisión")
+    return primera
 
 
 def factura_a_ticket_ligero(factura: dict) -> dict:
