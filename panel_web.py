@@ -8,7 +8,7 @@ de por medio -- solo números y una tabla de lo pendiente.
 import os
 from functools import wraps
 
-from flask import Blueprint, request, redirect, session, render_template_string, url_for
+from flask import Blueprint, request, redirect, session, render_template_string, url_for, get_flashed_messages
 
 from basededatos import verificar_login, obtener_resumen_panel, obtener_estado_conexiones, obtener_avisos, marcar_avisos_vistos
 
@@ -76,6 +76,13 @@ PLANTILLA_PANEL = """
   .plazo.urgente { background: #fff1e0; }
   .plazo.critico { background: #fdecea; }
   a.salir { float: right; color: #888; text-decoration: none; }
+  .btn { display: inline-block; padding: 4px 10px; border-radius: 4px; border: 1px solid #ccd; background: white;
+         color: #2d6cdf; font-size: .82em; cursor: pointer; text-decoration: none; white-space: nowrap; margin: 2px 2px 2px 0; }
+  .btn.principal { background: #2d6cdf; border-color: #2d6cdf; color: white; }
+  .btn:hover { opacity: .85; }
+  form.en-linea { display: inline; }
+  .ahorro .numero { color: #2d6cdf; }
+  .mensaje { background: #e8f6ee; padding: 10px 14px; border-radius: 4px; margin-bottom: 1rem; }
   .filtro { margin-bottom: .6rem; font-size: .9em; }
 </style></head><body>
   <a class="salir" href="{{ url_for('panel.logout') }}">Cerrar sesión</a>
@@ -87,6 +94,7 @@ PLANTILLA_PANEL = """
   </div>
   {% endif %}
   {% if aviso %}<p style="background:#fff4e5;padding:10px;border-radius:4px;">⚠ {{ aviso }} <a href="{{ url_for('alta.conexiones') }}">Resolver</a></p>{% endif %}
+  {% for m in mensajes %}<p class="mensaje">{{ m }}</p>{% endfor %}
   <p><a href="{{ url_for('alta.conexiones') }}">Conexiones y suscripción</a></p>
 
   {% if plazo %}
@@ -105,22 +113,36 @@ PLANTILLA_PANEL = """
     <div class="tarjeta tickets"><div class="numero">{{ resumen.TICKETS }}</div>Tickets</div>
     <div class="tarjeta revision"><div class="numero">{{ resumen.REVISION }}</div>En revisión</div>
     <div class="tarjeta sinid"><div class="numero">{{ resumen.SIN_IDENTIFICAR }}</div>Sin identificar</div>
+    <div class="tarjeta ahorro" title="Facturas leídas y archivadas este mes × {{ ahorro.minutos_por_doc }} min cada una">
+      <div class="numero">{% if ahorro.horas %}{{ ahorro.horas }} h {% endif %}{{ ahorro.minutos }} min</div>
+      Tiempo ahorrado este mes<br><small style="color:#888;">{{ ahorro.documentos }} facturas × {{ ahorro.minutos_por_doc }} min</small>
+    </div>
   </div>
 
   <h2>Qué tienes que revisar</h2>
   {% if atencion %}
   <div class="tabla"><table>
-    <tr><th>Empresa</th><th>Fecha</th><th>Proveedor / archivo</th><th class="num">Total</th><th>Estado</th><th>Motivo</th></tr>
+    <tr><th>Empresa</th><th>Fecha</th><th>Proveedor / archivo</th><th class="num">Total</th><th>Estado</th><th>Motivo</th><th>Acciones</th></tr>
     {% for p in atencion %}
     <tr>
       <td>{{ p.empresa }}</td><td>{{ p.fecha }}</td><td>{{ p.proveedor }}</td>
       <td class="num">{% if p.total is not none %}{{ "%.2f"|format(p.total) }} €{% else %}-{% endif %}</td>
       <td><span class="etiqueta {{ p.destino }}">{{ p.destino.replace("_", " ") }}</span></td>
       <td>{{ p.motivo or "-" }}</td>
+      <td>
+        {% if p.destino == "REVISION" %}
+          <a class="btn" href="{{ url_for('revision.abrir_revision', factura_id=p.id) }}" target="_blank">Abrir en OneDrive</a>
+          {% if p.corregible %}<a class="btn principal" href="{{ url_for('revision.corregir', factura_id=p.id) }}">Corregir y añadir al Excel</a>{% endif %}
+          <form class="en-linea" method="post" action="{{ url_for('revision.revisada', factura_id=p.id) }}"><button class="btn" type="submit">Marcar como revisada</button></form>
+        {% else %}
+          <a class="btn" href="{{ url_for('revision.abrir_sin_identificar') }}" target="_blank">Abrir en OneDrive</a>
+          <form class="en-linea" method="post" action="{{ url_for('revision.sin_identificar_revisado', documento_id=p.id) }}"><button class="btn" type="submit">Marcar como revisado</button></form>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </table></div>
-  <p style="color:#888;font-size:.85em;">Los originales están en la carpeta Revisión de cada empresa (o en «Sin identificar») en tu OneDrive.</p>
+  <p style="color:#888;font-size:.85em;">«Marcar como revisada» quita la línea de esta lista cuando ya la has gestionado por tu cuenta. «Corregir y añadir al Excel» te deja arreglar los datos y la anota en el Excel del trimestre.</p>
   {% else %}
   <p>No hay nada pendiente ahora mismo 🎉</p>
   {% endif %}
@@ -137,7 +159,7 @@ PLANTILLA_PANEL = """
   {% endif %}
   {% if clientes %}
   <div class="tabla"><table>
-    <tr><th>Cliente</th><th>Trimestre</th><th class="num">Facturas</th><th class="num">Total</th><th class="num">Tickets</th><th class="num">En revisión</th><th>Estado</th></tr>
+    <tr><th>Cliente</th><th>Trimestre</th><th class="num">Facturas</th><th class="num">Total</th><th class="num">Tickets</th><th class="num">En revisión</th><th class="num">Revisadas a mano</th><th>Estado</th></tr>
     {% for c in clientes %}
     <tr>
       <td>{{ c.empresa }}<br><small style="color:#888;">{{ c.cif }}</small></td>
@@ -146,6 +168,7 @@ PLANTILLA_PANEL = """
       <td class="num">{{ "%.2f"|format(c.total) }} €</td>
       <td class="num">{{ c.tickets }}</td>
       <td class="num">{{ c.revision }}</td>
+      <td class="num">{{ c.revisadas }}</td>
       <td><span class="etiqueta {{ c.estado }}">{{ {"LISTO": "Listo", "REVISAR": "Revisar", "SIN_FACTURAS": "Sin facturas"}[c.estado] }}</span></td>
     </tr>
     {% endfor %}
@@ -183,7 +206,8 @@ def panel():
     aviso = e["gmail_error"] or (None if e["onedrive"] else "Falta conectar OneDrive.")
     return render_template_string(
         PLANTILLA_PANEL, resumen=datos["resumen"], atencion=datos["atencion"], clientes=datos["clientes"],
-        trimestres=datos["trimestres"], plazo=datos["plazo"], filtro=filtro, aviso=aviso,
+        trimestres=datos["trimestres"], plazo=datos["plazo"], ahorro=datos["ahorro"], filtro=filtro, aviso=aviso,
+        mensajes=get_flashed_messages(),
         avisos=obtener_avisos(session["tenant_id"]))
 
 

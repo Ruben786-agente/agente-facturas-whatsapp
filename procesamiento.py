@@ -17,6 +17,7 @@ Reglas acordadas:
 """
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -25,7 +26,7 @@ import requests
 from datetime import datetime
 
 from basededatos import (
-    crear_aviso, registrar_sin_identificar,
+    crear_aviso, eliminar_factura_cache, marcar_revisada, obtener_revision, registrar_sin_identificar,
     guardar_factura_procesada, obtener_carpeta_sin_identificar,
     obtener_facturas_ya_registradas, resolver_empresa_cliente_por_cif,
 )
@@ -103,7 +104,8 @@ def _sin_identificar(storage, tenant_id, nombre, contenido, motivo):
 
 
 def _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, motivo):
-    storage.subir_archivo(empresa["carpeta_revision_id"], nombre_archivo_destino(nombre, "REVISION", motivo), contenido)
+    nombre_en_revision = nombre_archivo_destino(nombre, "REVISION", motivo)
+    storage.subir_archivo(empresa["carpeta_revision_id"], nombre_en_revision, contenido)
     guardar_factura_procesada(
         tenant_id=tenant_id, cif_empresa_cliente=empresa["cif_nif"], tipo_documento="factura_completa",
         num_factura=(factura.get("num_factura") or "").strip() or "(sin número)",
@@ -111,6 +113,7 @@ def _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, motivo)
         proveedor_cif=(factura.get("emisor") or {}).get("cif_nif"),
         proveedor_nombre=((factura.get("emisor") or {}).get("nombre") or "").strip() or "(desconocido)",
         total_factura=factura.get("total_factura") or 0, destino="REVISION", motivo=motivo,
+        datos_json=json.dumps({"factura": factura, "archivo": nombre_en_revision, "original": nombre}, default=str),
     )
     return {"accion": "revision", "empresa": empresa["nombre"], "cif": empresa["cif_nif"], "motivo": motivo}
 
@@ -134,7 +137,7 @@ def _guardar_ticket(storage, tenant_id, empresa, nombre, contenido, factura):
     return {"accion": "ticket", "empresa": empresa["nombre"], "cif": empresa["cif_nif"], "posible_duplicado": bool(posible_duplicado)}
 
 
-def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura):
+def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, reintento=False):
     numero = (factura.get("num_factura") or "").strip()
     cif_emisor = _normaliza_cif((factura.get("emisor") or {}).get("cif_nif"))
     total = factura.get("total_factura") or 0
@@ -149,6 +152,8 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura):
     try:
         periodo = calcular_periodo_trimestral(factura["fecha_factura"])
     except (ValueError, KeyError, TypeError):
+        if reintento:
+            return {"accion": "revision", "motivo": "fecha de la factura ilegible"}
         return _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, "fecha de la factura ilegible")
 
     nombre_excel = f"Export_{empresa['cif_nif']}_{periodo_a_slug(periodo)}.xlsx"
@@ -160,9 +165,12 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura):
         periodo=periodo, factura=factura,
     )
     if not resultado["ok"]:
+        if reintento:
+            return {"accion": "revision", "motivo": resultado["motivo"]}
         return _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, resultado["motivo"])
 
-    storage.subir_archivo(empresa["carpeta_facturas_id"], nombre, contenido)
+    if contenido is not None:
+        storage.subir_archivo(empresa["carpeta_facturas_id"], nombre, contenido)
     storage.subir_archivo(empresa["carpeta_excel_id"], nombre_excel, nuevo_excel)
     guardar_factura_procesada(
         tenant_id=tenant_id, cif_empresa_cliente=empresa["cif_nif"], tipo_documento="factura_completa",
@@ -308,3 +316,33 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
     if primer_error:
         raise primer_error
     return resultados
+
+
+def reprocesar_revision(storage, tenant_id, factura_id, factura):
+    """
+    La gestoría ha corregido a mano los datos de una factura en Revisión (desde el panel).
+    Se vuelve a validar y, si ya cuadra, se añade al Excel, el original pasa a la carpeta
+    Facturas y la factura sale de Revisión. Si sigue sin cuadrar, no se toca nada y se
+    devuelve {"accion": "revision", "motivo": ...} para que el panel lo enseñe.
+    Si el archivo ya no está en la carpeta Revisión (la gestoría lo movió), igualmente se añade
+    la fila al Excel; solo se omite el traslado del original.
+    """
+    r = obtener_revision(tenant_id, factura_id)
+    if not r or r["destino"] != "REVISION":
+        return {"accion": "error", "motivo": "Esta factura ya no está pendiente de revisión."}
+    empresa = r["empresa"]
+    datos = r["datos"] or {}
+    nombre_revision, original = datos.get("archivo"), datos.get("original") or datos.get("archivo") or "factura.pdf"
+
+    archivo = storage.buscar_archivo_por_nombre(empresa["carpeta_revision_id"], nombre_revision) if nombre_revision else None
+    contenido = storage.descargar_archivo(archivo.id) if archivo else None
+
+    factura = {**factura, "confianza": "alta"}  # la ha revisado una persona
+    res = _guardar_factura(storage, tenant_id, empresa, original, contenido, factura, reintento=True)
+    if res["accion"] == "procesada":
+        eliminar_factura_cache(tenant_id, factura_id)  # _guardar_factura ya ha creado su registro PROCESADA
+        if archivo:
+            storage.eliminar_archivo(archivo.id)  # el original ya está en Facturas
+    elif res["accion"] == "duplicado_exacto":
+        marcar_revisada(tenant_id, factura_id)
+    return res

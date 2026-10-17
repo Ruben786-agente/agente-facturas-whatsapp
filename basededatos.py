@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     create_engine, Column, String, Boolean, DateTime, Numeric, Date, LargeBinary, ForeignKey,
-    BigInteger, UniqueConstraint
+    BigInteger, UniqueConstraint, Text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import uuid
@@ -95,6 +95,7 @@ class FacturaCache(Base):
     total_factura = Column(Numeric(12, 2), nullable=False)
     destino = Column(String, nullable=False)
     motivo = Column(String)  # por qué está en Revisión, si aplica
+    datos_json = Column(Text)  # lectura de la IA de una factura en Revisión (para poder corregirla desde el panel)
     procesada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -257,7 +258,8 @@ def obtener_facturas_ya_registradas(tenant_id, cif_empresa_cliente):
 
 
 def guardar_factura_procesada(tenant_id, cif_empresa_cliente, tipo_documento, num_factura,
-                                fecha_factura, proveedor_cif, proveedor_nombre, total_factura, destino, motivo=None):
+                                fecha_factura, proveedor_cif, proveedor_nombre, total_factura, destino, motivo=None,
+                                datos_json=None):
     session = _obtener_session()
     try:
         empresa = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=cif_empresa_cliente).first()
@@ -267,10 +269,11 @@ def guardar_factura_procesada(tenant_id, cif_empresa_cliente, tipo_documento, nu
             tenant_id=tenant_id, empresa_cliente_id=empresa.id, tipo_documento=tipo_documento,
             num_factura=num_factura, fecha_factura=datetime.strptime(fecha_factura, "%d/%m/%Y").date(),
             proveedor_cif=proveedor_cif, proveedor_nombre=proveedor_nombre,
-            total_factura=total_factura, destino=destino, motivo=motivo,
+            total_factura=total_factura, destino=destino, motivo=motivo, datos_json=datos_json,
         )
         session.add(entrada)
         session.commit()
+        return entrada.id
     finally:
         session.close()
 
@@ -589,13 +592,17 @@ def _trimestre_en_plazo(hoy):
     return {"anio": anio, "trimestre": t, "plazo": plazo, "dias": (plazo - hoy).days}
 
 
+MINUTOS_POR_DOCUMENTO = 3  # tiempo que se estima que ahorra cada factura leída y archivada
+
+
 def obtener_resumen_panel(tenant_id, trimestre=None):
     """
     Para el panel de la gestoría:
       - resumen: cuántos documentos hay en cada estado (de todo el histórico),
       - clientes: una fila por empresa cliente y trimestre (facturas, total, tickets, revisión),
       - atencion: lo que la gestoría tiene que mirar (Revisión y Sin identificar),
-      - plazo: cuenta atrás del modelo 303 y cuántos clientes tienen algo sin revisar en ese trimestre.
+      - plazo: cuenta atrás del modelo 303 y cuántos clientes tienen algo sin revisar en ese trimestre,
+      - ahorro: documentos gestionados este mes y tiempo estimado ahorrado.
     'trimestre' (p. ej. "2024-1") filtra las filas de clientes.
     """
     from datetime import date
@@ -608,34 +615,44 @@ def obtener_resumen_panel(tenant_id, trimestre=None):
             .order_by(FacturaCache.procesada_en.desc())
             .all()
         )
-        resumen = {"PROCESADA": 0, "TICKETS": 0, "REVISION": 0, "SIN_IDENTIFICAR": 0}
+        resumen = {"PROCESADA": 0, "TICKETS": 0, "REVISION": 0, "SIN_IDENTIFICAR": 0, "REVISADA": 0}
         atencion, grupos = [], {}
+        hoy = datetime.now(timezone.utc)
+        docs_mes = 0
         for f, nombre_empresa, cif in filas:
             resumen[f.destino] = resumen.get(f.destino, 0) + 1
+            if f.destino in ("PROCESADA", "REVISADA"):
+                momento = _como_aware_utc(f.procesada_en) if f.procesada_en else None
+                if momento and (momento.year, momento.month) == (hoy.year, hoy.month):
+                    docs_mes += 1
             clave = (cif, f.fecha_factura.year, (f.fecha_factura.month - 1) // 3 + 1)
             g = grupos.setdefault(clave, {
                 "empresa": nombre_empresa, "cif": cif, "anio": clave[1], "trimestre": clave[2],
-                "facturas": 0, "total": 0.0, "tickets": 0, "revision": 0,
+                "facturas": 0, "total": 0.0, "tickets": 0, "revision": 0, "revisadas": 0,
             })
             if f.destino == "PROCESADA":
                 g["facturas"] += 1
                 g["total"] += float(f.total_factura)
+            elif f.destino == "REVISADA":
+                g["revisadas"] += 1
             elif f.destino == "TICKETS":
                 g["tickets"] += 1
             elif f.destino == "REVISION":
                 g["revision"] += 1
                 atencion.append({
-                    "empresa": nombre_empresa, "fecha": f.fecha_factura.strftime("%d/%m/%Y"),
+                    "id": f.id, "empresa": nombre_empresa, "fecha": f.fecha_factura.strftime("%d/%m/%Y"),
                     "proveedor": f.proveedor_nombre or "(desconocido)", "total": float(f.total_factura),
-                    "destino": "REVISION", "motivo": f.motivo,
+                    "destino": "REVISION", "motivo": f.motivo, "corregible": bool(f.datos_json),
                 })
         sin_id = (session.query(DocumentoSinIdentificar).filter_by(tenant_id=tenant_id)
                   .order_by(DocumentoSinIdentificar.registrado_en.desc()).all())
         resumen["SIN_IDENTIFICAR"] = len(sin_id)
         for d in sin_id:
             atencion.append({
-                "empresa": "(sin identificar)", "fecha": _como_aware_utc(d.registrado_en).strftime("%d/%m/%Y"),
+                "id": d.id, "empresa": "(sin identificar)",
+                "fecha": _como_aware_utc(d.registrado_en).strftime("%d/%m/%Y"),
                 "proveedor": d.nombre_archivo, "total": None, "destino": "SIN_IDENTIFICAR", "motivo": d.motivo,
+                "corregible": False,
             })
 
         todos = sorted(grupos.values(), key=lambda g: (-g["anio"], -g["trimestre"], g["empresa"]))
@@ -645,15 +662,83 @@ def obtener_resumen_panel(tenant_id, trimestre=None):
             clientes = [g for g in todos if f'{g["anio"]}-{g["trimestre"]}' == trimestre]
         for g in clientes:
             g["total"] = round(g["total"], 2)
-            g["estado"] = "REVISAR" if g["revision"] else ("LISTO" if g["facturas"] else "SIN_FACTURAS")
+            if g["revision"]:
+                g["estado"] = "REVISAR"
+            elif g["facturas"] or g["revisadas"]:
+                g["estado"] = "LISTO"
+            else:
+                g["estado"] = "SIN_FACTURAS"
 
         plazo = _trimestre_en_plazo(date.today())
         if plazo:
             del_trim = [g for g in todos if (g["anio"], g["trimestre"]) == (plazo["anio"], plazo["trimestre"])]
             plazo["clientes"] = len(del_trim)
             plazo["con_revision"] = sum(1 for g in del_trim if g["revision"])
+        minutos = docs_mes * MINUTOS_POR_DOCUMENTO
+        ahorro = {"documentos": docs_mes, "minutos_por_doc": MINUTOS_POR_DOCUMENTO,
+                  "horas": minutos // 60, "minutos": minutos % 60}
         return {"resumen": resumen, "clientes": clientes, "atencion": atencion[:100],
-                "trimestres": trimestres, "plazo": plazo}
+                "trimestres": trimestres, "plazo": plazo, "ahorro": ahorro}
+    finally:
+        session.close()
+
+
+def obtener_revision(tenant_id, factura_id):
+    """Una factura en Revisión con su empresa y la lectura guardada de la IA (o None)."""
+    import json
+    session = _obtener_session()
+    try:
+        f = session.query(FacturaCache).filter_by(id=factura_id, tenant_id=tenant_id).first()
+        if not f:
+            return None
+        e = session.get(EmpresaCliente, f.empresa_cliente_id)
+        try:
+            datos = json.loads(f.datos_json) if f.datos_json else None
+        except ValueError:
+            datos = None
+        return {
+            "id": f.id, "destino": f.destino, "motivo": f.motivo, "datos": datos,
+            "empresa": {
+                "id": e.id, "cif_nif": e.cif_nif, "nombre": e.nombre,
+                "carpeta_facturas_id": e.carpeta_facturas_id, "carpeta_tickets_id": e.carpeta_tickets_id,
+                "carpeta_revision_id": e.carpeta_revision_id, "carpeta_excel_id": e.carpeta_excel_id,
+            },
+        }
+    finally:
+        session.close()
+
+
+def marcar_revisada(tenant_id, factura_id):
+    """La gestoría ya ha gestionado esta factura por su cuenta: sale de la lista de pendientes."""
+    session = _obtener_session()
+    try:
+        f = session.query(FacturaCache).filter_by(id=factura_id, tenant_id=tenant_id, destino="REVISION").first()
+        if not f:
+            return False
+        f.destino = "REVISADA"
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def eliminar_factura_cache(tenant_id, factura_id):
+    session = _obtener_session()
+    try:
+        n = session.query(FacturaCache).filter_by(id=factura_id, tenant_id=tenant_id).delete()
+        session.commit()
+        return n > 0
+    finally:
+        session.close()
+
+
+def resolver_sin_identificar(tenant_id, documento_id):
+    """Quita un documento de la lista de 'Sin identificar' (ya se ha gestionado a mano)."""
+    session = _obtener_session()
+    try:
+        n = session.query(DocumentoSinIdentificar).filter_by(id=documento_id, tenant_id=tenant_id).delete()
+        session.commit()
+        return n > 0
     finally:
         session.close()
 

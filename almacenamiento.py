@@ -32,6 +32,13 @@ class AlmacenamientoDocumentos(ABC):
     @abstractmethod
     def crear_enlace_subida(self, carpeta_id): ...
 
+    def eliminar_archivo(self, archivo_id):
+        raise NotImplementedError
+
+    def obtener_enlace(self, elemento_id):
+        """Dirección web para abrir un archivo o carpeta en el navegador."""
+        raise NotImplementedError
+
 
 class OneDriveStorage(AlmacenamientoDocumentos):
     GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -65,6 +72,16 @@ class OneDriveStorage(AlmacenamientoDocumentos):
         resp = requests.get(f"{self._drive_prefix()}/items/{archivo_id}/content", headers=self._headers())
         resp.raise_for_status()
         return resp.content
+
+    def eliminar_archivo(self, archivo_id):
+        resp = requests.delete(f"{self._drive_prefix()}/items/{archivo_id}", headers=self._headers())
+        if resp.status_code != 404:
+            resp.raise_for_status()
+
+    def obtener_enlace(self, elemento_id):
+        resp = requests.get(f"{self._drive_prefix()}/items/{elemento_id}?select=webUrl", headers=self._headers())
+        resp.raise_for_status()
+        return resp.json()["webUrl"]
 
     def mover_o_renombrar(self, archivo_id, carpeta_destino_id=None, nuevo_nombre=None):
         body = {}
