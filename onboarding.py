@@ -74,6 +74,14 @@ def reparar_empresa(storage, tenant_id, nombre, cif):
     return carpetas
 
 
+def reconstruir_carpetas_empresas(storage, tenant_id):
+    """Tras conectar un almacenamiento nuevo: crea (o encuentra) las carpetas de las empresas que ya existen.
+    Se puede repetir sin duplicar nada."""
+    from basededatos import listar_empresas_activas
+    for e in listar_empresas_activas(tenant_id):
+        reparar_empresa(storage, tenant_id, e["nombre"], e["cif_nif"])
+
+
 def alta_varias_empresas(storage, tenant_id, empresas):
     """
     empresas: lista de (nombre, cif), por ejemplo leída de un Excel o de un

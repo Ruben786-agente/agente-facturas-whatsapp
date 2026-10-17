@@ -58,3 +58,11 @@ def refrescar_token(refresh_token: str, servicio: str = "Gmail") -> dict:
             raise ErrorAutorizacionGoogle(f"{servicio} desconectado: hay que volver a autorizar el acceso")
         raise ErrorAutorizacionGoogle(f"No se pudo renovar el acceso a {servicio}: {datos.get('error_description', datos.get('error'))}")
     return datos
+
+
+def revocar_token(refresh_token: str) -> None:
+    """Pide a Google que anule el acceso. Si falla no pasa nada: ya se ha borrado de nuestro lado."""
+    try:
+        requests.post("https://oauth2.googleapis.com/revoke", data={"token": refresh_token}, timeout=15)
+    except Exception:
+        pass

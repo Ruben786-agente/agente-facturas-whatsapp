@@ -204,7 +204,8 @@ def panel():
     filtro = request.args.get("t", "").strip()
     datos = obtener_resumen_panel(session["tenant_id"], trimestre=filtro or None)
     e = obtener_estado_conexiones(session["tenant_id"])
-    aviso = e["gmail_error"] or (None if e["almacenamiento"] else "Falta conectar OneDrive o Google Drive.")
+    aviso = e["gmail_error"] or (None if e["almacenamiento"] else "Falta conectar OneDrive o Google Drive.") \
+        or (None if e["gmail"] else "Falta conectar Gmail.")
     return render_template_string(
         PLANTILLA_PANEL, resumen=datos["resumen"], atencion=datos["atencion"], clientes=datos["clientes"],
         trimestres=datos["trimestres"], plazo=datos["plazo"], ahorro=datos["ahorro"], filtro=filtro, aviso=aviso,

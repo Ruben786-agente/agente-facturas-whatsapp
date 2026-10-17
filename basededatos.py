@@ -437,6 +437,39 @@ def guardar_credencial(tenant_id, proveedor, refresh_token, cuenta=None):
         session.close()
 
 
+def eliminar_credencial(tenant_id, proveedor):
+    """Borra el acceso guardado (Gmail, OneDrive o Google Drive). No toca facturas ni archivos ya guardados.
+    Devuelve el refresh token en claro (para poder revocarlo) o None si no había nada."""
+    session = _obtener_session()
+    try:
+        cred = session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id, proveedor=proveedor).first()
+        if cred is None:
+            return None
+        token = descifrar_refresh_token(cred.refresh_token_cifrado)
+        session.delete(cred)
+        if proveedor in ("onedrive", "gdrive"):
+            g = session.get(Gestoria, tenant_id)
+            if g:
+                g.carpeta_sin_identificar_id = None  # esas carpetas eran del almacenamiento anterior
+        if proveedor == "gmail":
+            estado = session.get(EstadoCorreo, tenant_id)
+            if estado:
+                estado.error = None
+        session.commit()
+        return token
+    finally:
+        session.close()
+
+
+def listar_empresas_activas(tenant_id):
+    session = _obtener_session()
+    try:
+        return [{"nombre": e.nombre, "cif_nif": e.cif_nif}
+                for e in session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, activa=True)]
+    finally:
+        session.close()
+
+
 # ---------------------------------------------------------------------------
 # Canal de correo (Gmail)
 # ---------------------------------------------------------------------------

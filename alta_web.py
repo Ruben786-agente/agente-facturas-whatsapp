@@ -19,8 +19,8 @@ import autenticacion_google as google
 import autenticacion_onedrive as microsoft
 from almacenamiento import obtener_almacenamiento
 from basededatos import (crear_gestoria_prueba, establecer_password, existe_email_gestoria,
-                         guardar_credencial, obtener_estado_conexiones)
-from onboarding import preparar_gestoria
+                         guardar_credencial, obtener_estado_conexiones, eliminar_credencial)
+from onboarding import preparar_gestoria, reconstruir_carpetas_empresas
 from panel_web import login_requerido
 
 log = logging.getLogger("alta_web")
@@ -58,6 +58,12 @@ PLANTILLA_REGISTRO = ESTILO + """
 
 PLANTILLA_CONEXIONES = ESTILO + """
 <!doctype html><html lang="es"><head><meta charset="utf-8"><title>Conexiones - Agente Facturas</title></head><body>
+{% macro desconectar(clave, nombre) %}
+<form method="post" action="{{ url_for('alta.desconectar', proveedor=clave) }}" style="display:inline"
+  onsubmit="return confirm('¿Desconectar {{ nombre }}? El agente dejará de usarlo. Lo que ya está guardado no se borra y podrás volver a conectarlo cuando quieras.');">
+  <button type="submit" class="boton gris" style="border:0;cursor:pointer;">Desconectar</button>
+</form>
+{% endmacro %}
 <div class="caja">
   <h2>Hola, {{ e.nombre }}</h2>
   {% if mensaje %}<p class="ok">{{ mensaje }}</p>{% endif %}
@@ -66,9 +72,11 @@ PLANTILLA_CONEXIONES = ESTILO + """
   <div class="paso">
     <b>1. Dónde guardar facturas y Excel</b> (elige OneDrive o Google Drive)<br>
     {% if e.almacenamiento == "onedrive" %}<span class="ok">✔ OneDrive conectado</span> {{ e.onedrive_cuenta or "" }}
+      {{ desconectar("onedrive", "OneDrive") }}
     {% elif e.almacenamiento == "gdrive" %}
       <span class="ok">✔ Google Drive conectado</span> {{ e.gdrive_cuenta or "" }}
       <a class="boton gris" href="{{ url_for('alta.conectar_gdrive') }}">Volver a autorizar</a>
+      {{ desconectar("gdrive", "Google Drive") }}
     {% else %}
       <a class="boton" href="{{ url_for('alta.conectar_onedrive') }}">Conectar OneDrive</a>
       <a class="boton" href="{{ url_for('alta.conectar_gdrive') }}">Conectar Google Drive</a>
@@ -80,6 +88,7 @@ PLANTILLA_CONEXIONES = ESTILO + """
     {% if e.gmail_error %}<p class="aviso">⚠ {{ e.gmail_error }}</p>{% endif %}
     {% if e.gmail and not e.gmail_error %}<span class="ok">✔ Conectado</span> {{ e.gmail_cuenta or "" }}
     {% else %}<a class="boton" href="{{ url_for('alta.conectar_gmail') }}">{{ "Volver a autorizar Gmail" if e.gmail else "Conectar Gmail" }}</a>{% endif %}
+    {% if e.gmail %}{{ desconectar("gmail", "Gmail") }}{% endif %}
   </div>
 
   <div class="paso">
@@ -155,7 +164,9 @@ def callback_onedrive():
         tenant_id = session["tenant_id"]
         cuenta = (token.get("id_token_claims") or {}).get("preferred_username")
         guardar_credencial(tenant_id, "onedrive", token["refresh_token"], cuenta)
-        preparar_gestoria(obtener_almacenamiento("onedrive", access_token=token["access_token"]), tenant_id)
+        _storage = obtener_almacenamiento("onedrive", access_token=token["access_token"])
+        preparar_gestoria(_storage, tenant_id)
+        reconstruir_carpetas_empresas(_storage, tenant_id)
     except Exception:
         log.exception("Fallo conectando OneDrive")
         return redirect(url_for("alta.conexiones", error="No se pudo conectar OneDrive. Inténtalo de nuevo."))
@@ -188,7 +199,9 @@ def _callback_gdrive(token):
     datos = requests.get("https://www.googleapis.com/drive/v3/about", params={"fields": "user(emailAddress)"},
                          headers={"Authorization": f"Bearer {token['access_token']}"}, timeout=30).json()
     guardar_credencial(tenant_id, "gdrive", token["refresh_token"], (datos.get("user") or {}).get("emailAddress"))
-    preparar_gestoria(obtener_almacenamiento("gdrive", access_token=token["access_token"]), tenant_id)
+    _storage = obtener_almacenamiento("gdrive", access_token=token["access_token"])
+    preparar_gestoria(_storage, tenant_id)
+    reconstruir_carpetas_empresas(_storage, tenant_id)
 
 
 @bp_alta.route("/onboarding/gmail/callback")
@@ -216,6 +229,21 @@ def callback_gmail():
         log.exception("Fallo conectando %s", nombre)
         return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtalo de nuevo."))
     return redirect(url_for("alta.conexiones", ok="Gmail conectado."))
+
+
+_NOMBRES = {"onedrive": "OneDrive", "gdrive": "Google Drive", "gmail": "Gmail"}
+
+
+@bp_alta.route("/conexiones/desconectar/<proveedor>", methods=["POST"])
+@login_requerido
+def desconectar(proveedor):
+    if proveedor not in _NOMBRES:
+        return redirect(url_for("alta.conexiones", error="Conexión no válida."))
+    token = eliminar_credencial(session["tenant_id"], proveedor)
+    if token and proveedor in ("gmail", "gdrive"):
+        google.revocar_token(token)
+    log.info("Gestoría %s desconectó %s", session["tenant_id"], proveedor)
+    return redirect(url_for("alta.conexiones", ok=f"{_NOMBRES[proveedor]} desconectado."))
 
 
 @bp_alta.route("/suscribirme")
