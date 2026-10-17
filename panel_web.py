@@ -43,6 +43,7 @@ PLANTILLA_LOGIN = """
       <label>Contraseña</label><input type="password" name="password" required>
       <button type="submit">Entrar</button>
     </form>
+    <p style="text-align:center;font-size:.9em;margin-top:1rem;">¿Aún no tienes cuenta? <a href="{{ url_for('alta.registro') }}">Pruébalo 14 días gratis</a></p>
   </div>
 </body></html>
 """
