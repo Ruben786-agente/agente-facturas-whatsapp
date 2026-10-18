@@ -181,7 +181,7 @@ PLANTILLA_PANEL = pagina("Panel", """
       {% endfor %}
     </table></div>
     {% else %}
-    <div class="vacio"><strong>Todavía no hay facturas procesadas.</strong>Cuando lleguen correos con facturas a su Gmail, verá aquí cada cliente por trimestre.</div>
+    <div class="vacio"><strong>Todavía no hay facturas procesadas.</strong>Cuando lleguen correos con facturas a su correo, verá aquí cada cliente por trimestre.</div>
     {% endif %}
   </section>
 </main>
@@ -211,8 +211,8 @@ def panel():
     filtro = request.args.get("t", "").strip()
     datos = obtener_resumen_panel(session["tenant_id"], trimestre=filtro or None)
     e = obtener_estado_conexiones(session["tenant_id"])
-    aviso = e["gmail_error"] or (None if e["almacenamiento"] else "Falta conectar OneDrive o Google Drive.") \
-        or (None if e["gmail"] else "Falta conectar Gmail.")
+    aviso = e["correo_error"] or (None if e["almacenamiento"] else "Falta conectar OneDrive o Google Drive.") \
+        or (None if e["correo"] else "Falta conectar su correo (Gmail u Outlook).")
     return render_template_string(
         PLANTILLA_PANEL, resumen=datos["resumen"], atencion=datos["atencion"], clientes=datos["clientes"],
         trimestres=datos["trimestres"], plazo=datos["plazo"], ahorro=datos["ahorro"], filtro=filtro, aviso=aviso,

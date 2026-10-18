@@ -431,6 +431,12 @@ def guardar_credencial(tenant_id, proveedor, refresh_token, cuenta=None):
             session.add(cred)
         cred.refresh_token_cifrado = cifrar_refresh_token(refresh_token)
         cred.cuenta_conectada = cuenta
+        if proveedor in ("gmail", "outlook"):
+            # Solo un correo a la vez: al conectar uno nuevo se quita el otro.
+            otro_correo = "outlook" if proveedor == "gmail" else "gmail"
+            viejo_correo = session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id, proveedor=otro_correo).first()
+            if viejo_correo is not None:
+                session.delete(viejo_correo)
         if proveedor in ("onedrive", "gdrive"):
             # Solo un almacenamiento a la vez: al conectar uno nuevo se quita el otro.
             otro = "gdrive" if proveedor == "onedrive" else "onedrive"
@@ -460,7 +466,7 @@ def eliminar_credencial(tenant_id, proveedor):
             g = session.get(Gestoria, tenant_id)
             if g:
                 g.carpeta_sin_identificar_id = None  # esas carpetas eran del almacenamiento anterior
-        if proveedor == "gmail":
+        if proveedor in ("gmail", "outlook"):
             estado = session.get(EstadoCorreo, tenant_id)
             if estado:
                 estado.error = None
@@ -470,13 +476,22 @@ def eliminar_credencial(tenant_id, proveedor):
         session.close()
 
 
+def proveedor_correo_activo(tenant_id):
+    """'gmail', 'outlook' o None."""
+    return _proveedor_activo(tenant_id, ("gmail", "outlook"))
+
+
 def proveedor_almacenamiento_activo(tenant_id):
     """'onedrive', 'gdrive' o None. Si por lo que sea hubiera los dos conectados, manda el último que se conectó."""
+    return _proveedor_activo(tenant_id, ("onedrive", "gdrive"))
+
+
+def _proveedor_activo(tenant_id, proveedores):
     session = _obtener_session()
     try:
         creds = session.query(CredencialAlmacenamiento).filter(
             CredencialAlmacenamiento.tenant_id == tenant_id,
-            CredencialAlmacenamiento.proveedor.in_(("onedrive", "gdrive"))).all()
+            CredencialAlmacenamiento.proveedor.in_(proveedores)).all()
         if not creds:
             return None
         ultima = max(creds, key=lambda c: _como_aware_utc(c.conectada_en) if c.conectada_en else datetime.min.replace(tzinfo=timezone.utc))
@@ -499,7 +514,7 @@ def listar_empresas_activas(tenant_id):
 # ---------------------------------------------------------------------------
 
 def tenants_con_correo():
-    """Gestorías con acceso vigente que tienen Gmail y un almacenamiento (OneDrive o Google Drive) conectados."""
+    """Gestorías con acceso vigente que tienen correo (Gmail u Outlook) y un almacenamiento (OneDrive o Google Drive) conectados."""
     session = _obtener_session()
     try:
         ahora = datetime.now(timezone.utc)
@@ -510,7 +525,7 @@ def tenants_con_correo():
             if not vigente:
                 continue
             provs = {c.proveedor for c in session.query(CredencialAlmacenamiento).filter_by(tenant_id=g.tenant_id)}
-            if "gmail" in provs and ({"onedrive", "gdrive"} & provs):
+            if ({"gmail", "outlook"} & provs) and ({"onedrive", "gdrive"} & provs):
                 resultado.append(g.tenant_id)
         return resultado
     finally:
@@ -893,7 +908,10 @@ def obtener_estado_conexiones(tenant_id):
             "gdrive": "gdrive" in provs, "gdrive_cuenta": provs.get("gdrive"),
             "almacenamiento": proveedor_almacenamiento_activo(tenant_id),
             "gmail": "gmail" in provs, "gmail_cuenta": provs.get("gmail"),
+            "outlook": "outlook" in provs, "outlook_cuenta": provs.get("outlook"),
+            "correo": proveedor_correo_activo(tenant_id), "correo_cuenta": provs.get(proveedor_correo_activo(tenant_id) or ""),
             "gmail_error": estado_correo.error if estado_correo else None,
+            "correo_error": estado_correo.error if estado_correo else None,
         }
     finally:
         session.close()

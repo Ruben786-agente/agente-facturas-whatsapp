@@ -19,7 +19,7 @@ import autenticacion_google as google
 import autenticacion_onedrive as microsoft
 from almacenamiento import obtener_almacenamiento
 from basededatos import (crear_gestoria_prueba, establecer_password, existe_email_gestoria,
-                         guardar_credencial, obtener_estado_conexiones, eliminar_credencial)
+                         guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial)
 from onboarding import preparar_gestoria, reconstruir_carpetas_empresas
 from estilo_web import acceso, pagina
 from panel_web import login_requerido
@@ -31,7 +31,7 @@ _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 PLANTILLA_REGISTRO = acceso("Crear cuenta", """
   <h2>Prueba 14 días gratis</h2>
-  <p class="tenue">Sin tarjeta. Solo necesita su cuenta de OneDrive o de Google Drive, y su Gmail.</p>
+  <p class="tenue">Sin tarjeta. Solo necesita su cuenta de OneDrive o de Google Drive, y su correo (Gmail u Outlook).</p>
   <form method="post">
     <label for="nombre">Nombre de la gestoría</label>
     <input id="nombre" name="nombre" autocomplete="organization" required autofocus>
@@ -92,15 +92,22 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
       </div>
     </section>
 
-    <section class="paso {% if e.gmail and not e.gmail_error %}hecho{% endif %}">
-      <span class="n">{% if e.gmail and not e.gmail_error %}✓{% else %}2{% endif %}</span>
-      <h3>Gmail</h3>
-      <p class="que">El agente lee los correos con facturas adjuntas.</p>
+    <section class="paso {% if e.correo and not e.correo_error %}hecho{% endif %}">
+      <span class="n">{% if e.correo and not e.correo_error %}✓{% else %}2{% endif %}</span>
+      <h3>Correo</h3>
+      <p class="que">El agente lee los correos con facturas adjuntas. Elija Gmail o Outlook / Microsoft 365; solo se usa uno a la vez.</p>
       <div class="estado-linea">
-        {% if e.gmail_error %}<span class="alerta" style="margin:0;padding:8px 12px;">{{ e.gmail_error }}</span>{% endif %}
-        {% if e.gmail and not e.gmail_error %}<span class="conectado">Gmail conectado</span> <span class="tenue">{{ e.gmail_cuenta or "" }}</span>
-        {% else %}<a class="btn principal" href="{{ url_for('alta.conectar_gmail') }}">{{ "Volver a autorizar Gmail" if e.gmail else "Conectar Gmail" }}</a>{% endif %}
-        {% if e.gmail %}{{ desconectar("gmail", "Gmail") }}{% endif %}
+        {% if e.correo_error %}<span class="alerta" style="margin:0;padding:8px 12px;">{{ e.correo_error }}</span>{% endif %}
+        {% if e.correo == "gmail" %}
+          {% if not e.correo_error %}<span class="conectado">Gmail conectado</span> <span class="tenue">{{ e.correo_cuenta or "" }}</span>{% endif %}
+          <a class="btn {% if e.correo_error %}principal{% endif %}" href="{{ url_for('alta.conectar_gmail') }}">Volver a autorizar</a> {{ desconectar("gmail", "Gmail") }}
+        {% elif e.correo == "outlook" %}
+          {% if not e.correo_error %}<span class="conectado">Outlook conectado</span> <span class="tenue">{{ e.correo_cuenta or "" }}</span>{% endif %}
+          <a class="btn {% if e.correo_error %}principal{% endif %}" href="{{ url_for('alta.conectar_outlook') }}">Volver a autorizar</a> {{ desconectar("outlook", "Outlook") }}
+        {% else %}
+          <a class="btn principal" href="{{ url_for('alta.conectar_gmail') }}">Conectar Gmail</a>
+          <a class="btn principal" href="{{ url_for('alta.conectar_outlook') }}">Conectar Outlook / Microsoft 365</a>
+        {% endif %}
       </div>
     </section>
 
@@ -170,26 +177,43 @@ def conectar_onedrive():
     if obtener_estado_conexiones(session["tenant_id"])["gdrive"]:
         return redirect(url_for("alta.conexiones", error="Ya tiene Google Drive conectado. Solo se puede usar un almacenamiento."))
     session["state_ms"] = secrets.token_urlsafe(24)
+    session["ms_proposito"] = "onedrive"
     return redirect(microsoft.generar_url_autorizacion(session["state_ms"]))
+
+
+@bp_alta.route("/onboarding/outlook")
+@login_requerido
+def conectar_outlook():
+    session["state_ms"] = secrets.token_urlsafe(24)
+    session["ms_proposito"] = "outlook"  # vuelve por la misma dirección que OneDrive
+    return redirect(microsoft.generar_url_autorizacion(session["state_ms"], scopes=microsoft.SCOPES_CORREO))
 
 
 def callback_onedrive():
     if "tenant_id" not in session:
         return redirect(url_for("panel.login"))
+    proposito = session.get("ms_proposito", "onedrive")
+    nombre = "Outlook" if proposito == "outlook" else "OneDrive"
     if request.args.get("error") or request.args.get("state") != session.get("state_ms"):
-        return redirect(url_for("alta.conexiones", error="No se pudo conectar OneDrive. Inténtelo de nuevo."))
+        return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtelo de nuevo."))
     try:
-        token = microsoft.procesar_callback(request.args["code"])
         tenant_id = session["tenant_id"]
-        cuenta = (token.get("id_token_claims") or {}).get("preferred_username")
-        guardar_credencial(tenant_id, "onedrive", token["refresh_token"], cuenta)
-        _storage = obtener_almacenamiento("onedrive", access_token=token["access_token"])
-        preparar_gestoria(_storage, tenant_id)
-        reconstruir_carpetas_empresas(_storage, tenant_id)
+        if proposito == "outlook":
+            token = microsoft.procesar_callback(request.args["code"], scopes=microsoft.SCOPES_CORREO)
+            cuenta = (token.get("id_token_claims") or {}).get("preferred_username")
+            guardar_credencial(tenant_id, "outlook", token["refresh_token"], cuenta)
+            guardar_estado_correo(tenant_id, error=None)  # limpia el aviso "Outlook desconectado"
+        else:
+            token = microsoft.procesar_callback(request.args["code"])
+            cuenta = (token.get("id_token_claims") or {}).get("preferred_username")
+            guardar_credencial(tenant_id, "onedrive", token["refresh_token"], cuenta)
+            _storage = obtener_almacenamiento("onedrive", access_token=token["access_token"])
+            preparar_gestoria(_storage, tenant_id)
+            reconstruir_carpetas_empresas(_storage, tenant_id)
     except Exception:
-        log.exception("Fallo conectando OneDrive")
-        return redirect(url_for("alta.conexiones", error="No se pudo conectar OneDrive. Inténtelo de nuevo."))
-    return redirect(url_for("alta.conexiones", ok="OneDrive conectado."))
+        log.exception("Fallo conectando %s", nombre)
+        return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtelo de nuevo."))
+    return redirect(url_for("alta.conexiones", ok=f"{nombre} conectado."))
 
 
 bp_alta.add_url_rule(_ruta_callback_microsoft(), "callback_onedrive", callback_onedrive)
@@ -242,7 +266,6 @@ def callback_gmail():
                               headers={"Authorization": f"Bearer {token['access_token']}"}, timeout=30).json()
         tenant_id = session["tenant_id"]
         guardar_credencial(tenant_id, "gmail", token["refresh_token"], perfil.get("emailAddress"))
-        from basededatos import guardar_estado_correo
         guardar_estado_correo(tenant_id, error=None)  # limpia el aviso "Gmail desconectado"
     except Exception:
         log.exception("Fallo conectando %s", nombre)
@@ -250,7 +273,7 @@ def callback_gmail():
     return redirect(url_for("alta.conexiones", ok="Gmail conectado."))
 
 
-_NOMBRES = {"onedrive": "OneDrive", "gdrive": "Google Drive", "gmail": "Gmail"}
+_NOMBRES = {"onedrive": "OneDrive", "gdrive": "Google Drive", "gmail": "Gmail", "outlook": "Outlook"}
 
 
 @bp_alta.route("/conexiones/desconectar/<proveedor>", methods=["POST"])
@@ -259,7 +282,7 @@ def desconectar(proveedor):
     if proveedor not in _NOMBRES:
         return redirect(url_for("alta.conexiones", error="Conexión no válida."))
     token = eliminar_credencial(session["tenant_id"], proveedor)
-    if token and proveedor in ("gmail", "gdrive"):
+    if token and proveedor in ("gmail", "gdrive"):  # Microsoft no ofrece anular el acceso desde aquí
         google.revocar_token(token)
     log.info("Gestoría %s desconectó %s", session["tenant_id"], proveedor)
     return redirect(url_for("alta.conexiones", ok=f"{_NOMBRES[proveedor]} desconectado."))
