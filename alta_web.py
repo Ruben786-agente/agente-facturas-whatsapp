@@ -21,6 +21,7 @@ from almacenamiento import obtener_almacenamiento
 from basededatos import (crear_gestoria_prueba, establecer_password, existe_email_gestoria,
                          guardar_credencial, obtener_estado_conexiones, eliminar_credencial)
 from onboarding import preparar_gestoria, reconstruir_carpetas_empresas
+from estilo_web import acceso, pagina
 from panel_web import login_requerido
 
 log = logging.getLogger("alta_web")
@@ -28,86 +29,103 @@ bp_alta = Blueprint("alta", __name__)
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-ESTILO = """
+PLANTILLA_REGISTRO = acceso("Crear cuenta", """
+  <h2>Prueba 14 días gratis</h2>
+  <p class="tenue">Sin tarjeta. Solo necesita su cuenta de OneDrive o de Google Drive, y su Gmail.</p>
+  <form method="post">
+    <label for="nombre">Nombre de la gestoría</label>
+    <input id="nombre" name="nombre" autocomplete="organization" required autofocus>
+    <label for="email">Email</label>
+    <input id="email" type="email" name="email" autocomplete="email" required>
+    <label for="password">Contraseña (mínimo 8 caracteres)</label>
+    <input id="password" type="password" name="password" autocomplete="new-password" required minlength="8">
+    {% if error %}<p class="error-texto" role="alert">{{ error }}</p>{% endif %}
+    <button class="btn principal grande" type="submit">Crear cuenta</button>
+  </form>
+  <p class="pie"><a href="{{ url_for('panel.login') }}">Ya tengo cuenta</a></p>
+""")
+
+CSS_CONEXIONES = """
 <style>
-  body { font-family: Arial, sans-serif; background: #f4f5f7; margin: 0; padding: 2rem; }
-  .caja { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.1); max-width: 520px; margin: 0 auto; }
-  input { width: 100%; padding: 8px; margin: 6px 0 14px 0; box-sizing: border-box; }
-  .boton, button { display: inline-block; padding: 10px 16px; background: #2d6cdf; color: white; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; font-size: 1em; }
-  .boton.gris { background: #888; }
-  .error { color: #c0392b; } .ok { color: #27ae60; } .aviso { background: #fff4e5; padding: 10px; border-radius: 4px; }
-  .paso { border-top: 1px solid #eee; padding: 1rem 0; }
+  .pasos { display: grid; gap: 14px; margin-top: 28px; }
+  .paso { background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; padding: 20px 22px; display: grid;
+          grid-template-columns: 36px minmax(0, 1fr); gap: 4px 16px; }
+  .paso .n { grid-row: span 3; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--linea-fuerte); display: grid; place-items: center;
+             font: 500 16px/1 var(--serif); color: var(--tinta-2); }
+  .paso.hecho .n { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .paso h3 { font-size: 20px; }
+  .paso .que { color: var(--tinta-2); margin: 0; }
+  .paso .estado-linea { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .conectado { color: var(--ok); font-weight: 500; }
+  .paso.opcional .n { border-style: dashed; }
+  @media (max-width: 560px) { .paso { grid-template-columns: 1fr; } .paso .n { display: none; } }
 </style>
 """
 
-PLANTILLA_REGISTRO = ESTILO + """
-<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Crear cuenta - Agente Facturas</title></head><body>
-<div class="caja">
-  <h2>Prueba gratis 14 días</h2>
-  <p>Sin tarjeta. Solo necesitas tu cuenta de OneDrive o de Google Drive, y tu Gmail.</p>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
-  <form method="post">
-    <label>Nombre de la gestoría</label><input name="nombre" required>
-    <label>Email</label><input type="email" name="email" required>
-    <label>Contraseña (mínimo 8 caracteres)</label><input type="password" name="password" required minlength="8">
-    <button type="submit">Crear cuenta</button>
-  </form>
-  <p><a href="{{ url_for('panel.login') }}">Ya tengo cuenta</a></p>
-</div></body></html>
-"""
-
-PLANTILLA_CONEXIONES = ESTILO + """
-<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Conexiones - Agente Facturas</title></head><body>
+PLANTILLA_CONEXIONES = pagina("Conexiones", """
 {% macro desconectar(clave, nombre) %}
-<form method="post" action="{{ url_for('alta.desconectar', proveedor=clave) }}" style="display:inline"
-  onsubmit="return confirm('¿Desconectar {{ nombre }}? El agente dejará de usarlo. Lo que ya está guardado no se borra y podrás volver a conectarlo cuando quieras.');">
-  <button type="submit" class="boton gris" style="border:0;cursor:pointer;">Desconectar</button>
+<form method="post" action="{{ url_for('alta.desconectar', proveedor=clave) }}" class="en-linea"
+  onsubmit="return confirm('¿Desconectar {{ nombre }}? El agente dejará de usarlo. Lo que ya está guardado no se borra y podrá volver a conectarlo cuando quiera.');">
+  <button type="submit" class="btn discreto">Desconectar</button>
 </form>
 {% endmacro %}
-<div class="caja">
-  <h2>Hola, {{ e.nombre }}</h2>
-  {% if mensaje %}<p class="ok">{{ mensaje }}</p>{% endif %}
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+<main class="pagina estrecha">
+  <h1 style="font-size:38px;">Conexiones y suscripción</h1>
+  <p class="tenue" style="margin-top:6px;">Conecte su correo y su almacenamiento una vez y el agente trabaja solo.</p>
+  {% if mensaje %}<p class="mensaje" role="status" style="margin-top:20px;">{{ mensaje }}</p>{% endif %}
+  {% if error %}<p class="alerta error" role="alert" style="margin-top:20px;">{{ error }}</p>{% endif %}
 
-  <div class="paso">
-    <b>1. Dónde guardar facturas y Excel</b> (elige OneDrive o Google Drive)<br>
-    {% if e.almacenamiento == "onedrive" %}<span class="ok">✔ OneDrive conectado</span> {{ e.onedrive_cuenta or "" }}
-      {{ desconectar("onedrive", "OneDrive") }}
-    {% elif e.almacenamiento == "gdrive" %}
-      <span class="ok">✔ Google Drive conectado</span> {{ e.gdrive_cuenta or "" }}
-      <a class="boton gris" href="{{ url_for('alta.conectar_gdrive') }}">Volver a autorizar</a>
-      {{ desconectar("gdrive", "Google Drive") }}
-    {% else %}
-      <a class="boton" href="{{ url_for('alta.conectar_onedrive') }}">Conectar OneDrive</a>
-      <a class="boton" href="{{ url_for('alta.conectar_gdrive') }}">Conectar Google Drive</a>
-    {% endif %}
+  <div class="pasos">
+    <section class="paso {% if e.almacenamiento %}hecho{% endif %}">
+      <span class="n">{% if e.almacenamiento %}✓{% else %}1{% endif %}</span>
+      <h3>Dónde guardar facturas y Excel</h3>
+      <p class="que">Elija OneDrive o Google Drive. Solo se usa uno a la vez.</p>
+      <div class="estado-linea">
+        {% if e.almacenamiento == "onedrive" %}<span class="conectado">OneDrive conectado</span> <span class="tenue">{{ e.onedrive_cuenta or "" }}</span> {{ desconectar("onedrive", "OneDrive") }}
+        {% elif e.almacenamiento == "gdrive" %}
+          <span class="conectado">Google Drive conectado</span> <span class="tenue">{{ e.gdrive_cuenta or "" }}</span>
+          <a class="btn" href="{{ url_for('alta.conectar_gdrive') }}">Volver a autorizar</a> {{ desconectar("gdrive", "Google Drive") }}
+        {% else %}
+          <a class="btn principal" href="{{ url_for('alta.conectar_onedrive') }}">Conectar OneDrive</a>
+          <a class="btn principal" href="{{ url_for('alta.conectar_gdrive') }}">Conectar Google Drive</a>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="paso {% if e.gmail and not e.gmail_error %}hecho{% endif %}">
+      <span class="n">{% if e.gmail and not e.gmail_error %}✓{% else %}2{% endif %}</span>
+      <h3>Gmail</h3>
+      <p class="que">El agente lee los correos con facturas adjuntas.</p>
+      <div class="estado-linea">
+        {% if e.gmail_error %}<span class="alerta" style="margin:0;padding:8px 12px;">{{ e.gmail_error }}</span>{% endif %}
+        {% if e.gmail and not e.gmail_error %}<span class="conectado">Gmail conectado</span> <span class="tenue">{{ e.gmail_cuenta or "" }}</span>
+        {% else %}<a class="btn principal" href="{{ url_for('alta.conectar_gmail') }}">{{ "Volver a autorizar Gmail" if e.gmail else "Conectar Gmail" }}</a>{% endif %}
+        {% if e.gmail %}{{ desconectar("gmail", "Gmail") }}{% endif %}
+      </div>
+    </section>
+
+    <section class="paso {% if e.plan == 'activo' %}hecho{% endif %}">
+      <span class="n">{% if e.plan == 'activo' %}✓{% else %}3{% endif %}</span>
+      <h3>Suscripción</h3>
+      <div class="estado-linea">
+        {% if e.plan == "activo" %}<span class="conectado">Suscripción activa</span>
+        {% else %}
+          {% if e.plan == "trial" and e.trial_expira_en %}<span class="que">Prueba gratuita hasta el {{ e.trial_expira_en.strftime("%d/%m/%Y") }}.</span>{% endif %}
+          <a class="btn principal" href="{{ url_for('alta.suscribirme') }}">Suscribirme</a>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="paso opcional">
+      <span class="n">+</span>
+      <h3>WhatsApp <small>(opcional)</small></h3>
+      <p class="que">Próximamente podrá recibir también las facturas que sus clientes envíen por WhatsApp.</p>
+    </section>
   </div>
 
-  <div class="paso">
-    <b>2. Gmail</b> (el agente lee los correos con facturas)<br>
-    {% if e.gmail_error %}<p class="aviso">⚠ {{ e.gmail_error }}</p>{% endif %}
-    {% if e.gmail and not e.gmail_error %}<span class="ok">✔ Conectado</span> {{ e.gmail_cuenta or "" }}
-    {% else %}<a class="boton" href="{{ url_for('alta.conectar_gmail') }}">{{ "Volver a autorizar Gmail" if e.gmail else "Conectar Gmail" }}</a>{% endif %}
-    {% if e.gmail %}{{ desconectar("gmail", "Gmail") }}{% endif %}
-  </div>
-
-  <div class="paso">
-    <b>WhatsApp</b> (opcional)<br>
-    <span style="color:#888;">Próximamente: podrás recibir también las facturas que tus clientes envíen por WhatsApp.</span>
-  </div>
-
-  <div class="paso">
-    <b>3. Suscripción</b><br>
-    {% if e.plan == "activo" %}<span class="ok">✔ Suscripción activa</span>
-    {% else %}
-      {% if e.plan == "trial" and e.trial_expira_en %}Prueba gratuita hasta el {{ e.trial_expira_en.strftime("%d/%m/%Y") }}.<br>{% endif %}
-      <a class="boton" href="{{ url_for('alta.suscribirme') }}">Suscribirme</a>
-    {% endif %}
-  </div>
-
-  <p><a class="boton gris" href="{{ url_for('panel.panel') }}">Ir al panel</a></p>
-</div></body></html>
-"""
+  <p style="margin-top:28px;"><a class="btn" href="{{ url_for('panel.panel') }}">Ir al panel</a></p>
+</main>
+""", activa="conexiones", extra_head=CSS_CONEXIONES)
 
 
 def _ruta_callback_microsoft():
@@ -123,7 +141,7 @@ def registro():
         password = request.form.get("password", "")
         error = None
         if not nombre or not _EMAIL.match(email):
-            error = "Revisa el nombre y el email."
+            error = "Revise el nombre y el email."
         elif len(password) < 8:
             error = "La contraseña debe tener al menos 8 caracteres."
         elif existe_email_gestoria(email):
@@ -141,7 +159,8 @@ def registro():
 @bp_alta.route("/conexiones")
 @login_requerido
 def conexiones():
-    return render_template_string(PLANTILLA_CONEXIONES, e=obtener_estado_conexiones(session["tenant_id"]),
+    estado = obtener_estado_conexiones(session["tenant_id"])
+    return render_template_string(PLANTILLA_CONEXIONES, e=estado, gestoria_nombre=estado["nombre"],
                                   mensaje=request.args.get("ok"), error=request.args.get("error"))
 
 
@@ -149,7 +168,7 @@ def conexiones():
 @login_requerido
 def conectar_onedrive():
     if obtener_estado_conexiones(session["tenant_id"])["gdrive"]:
-        return redirect(url_for("alta.conexiones", error="Ya tienes Google Drive conectado. Solo se puede usar un almacenamiento."))
+        return redirect(url_for("alta.conexiones", error="Ya tiene Google Drive conectado. Solo se puede usar un almacenamiento."))
     session["state_ms"] = secrets.token_urlsafe(24)
     return redirect(microsoft.generar_url_autorizacion(session["state_ms"]))
 
@@ -158,7 +177,7 @@ def callback_onedrive():
     if "tenant_id" not in session:
         return redirect(url_for("panel.login"))
     if request.args.get("error") or request.args.get("state") != session.get("state_ms"):
-        return redirect(url_for("alta.conexiones", error="No se pudo conectar OneDrive. Inténtalo de nuevo."))
+        return redirect(url_for("alta.conexiones", error="No se pudo conectar OneDrive. Inténtelo de nuevo."))
     try:
         token = microsoft.procesar_callback(request.args["code"])
         tenant_id = session["tenant_id"]
@@ -169,7 +188,7 @@ def callback_onedrive():
         reconstruir_carpetas_empresas(_storage, tenant_id)
     except Exception:
         log.exception("Fallo conectando OneDrive")
-        return redirect(url_for("alta.conexiones", error="No se pudo conectar OneDrive. Inténtalo de nuevo."))
+        return redirect(url_for("alta.conexiones", error="No se pudo conectar OneDrive. Inténtelo de nuevo."))
     return redirect(url_for("alta.conexiones", ok="OneDrive conectado."))
 
 
@@ -188,7 +207,7 @@ def conectar_gmail():
 @login_requerido
 def conectar_gdrive():
     if obtener_estado_conexiones(session["tenant_id"])["onedrive"]:
-        return redirect(url_for("alta.conexiones", error="Ya tienes OneDrive conectado. Solo se puede usar un almacenamiento."))
+        return redirect(url_for("alta.conexiones", error="Ya tiene OneDrive conectado. Solo se puede usar un almacenamiento."))
     session["state_g"] = secrets.token_urlsafe(24)
     session["google_proposito"] = "gdrive"  # vuelve por la misma dirección que Gmail
     return redirect(google.generar_url_autorizacion(session["state_g"], scopes=google.SCOPES_DRIVE))
@@ -211,7 +230,7 @@ def callback_gmail():
     proposito = session.get("google_proposito", "gmail")
     nombre = "Google Drive" if proposito == "gdrive" else "Gmail"
     if request.args.get("error") or request.args.get("state") != session.get("state_g"):
-        return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtalo de nuevo."))
+        return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtelo de nuevo."))
     try:
         token = google.procesar_callback(request.args["code"])
         if "refresh_token" not in token:
@@ -227,7 +246,7 @@ def callback_gmail():
         guardar_estado_correo(tenant_id, error=None)  # limpia el aviso "Gmail desconectado"
     except Exception:
         log.exception("Fallo conectando %s", nombre)
-        return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtalo de nuevo."))
+        return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtelo de nuevo."))
     return redirect(url_for("alta.conexiones", ok="Gmail conectado."))
 
 
@@ -254,9 +273,9 @@ def suscribirme():
         from stripe_integracion import crear_sesion_pago
         e = obtener_estado_conexiones(session["tenant_id"])
         url = crear_sesion_pago(session["tenant_id"], e["email"],
-                                base + url_for("alta.conexiones", ok="¡Gracias! Tu suscripción se activará en unos segundos."),
+                                base + url_for("alta.conexiones", ok="¡Gracias! Su suscripción se activará en unos segundos."),
                                 base + url_for("alta.conexiones"))
     except Exception:
         log.exception("Fallo creando sesión de pago")
-        return redirect(url_for("alta.conexiones", error="No se pudo abrir el pago. Inténtalo más tarde."))
+        return redirect(url_for("alta.conexiones", error="No se pudo abrir el pago. Inténtelo más tarde."))
     return redirect(url)

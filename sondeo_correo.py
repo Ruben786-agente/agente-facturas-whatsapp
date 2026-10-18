@@ -32,7 +32,7 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
         try:
             storage = storage_para_tenant(tenant_id)
         except ErrorAutorizacionGoogle as e:  # Google Drive revocado o caducado
-            crear_aviso(tenant_id, "drive_desconectado", f"{e}. Entra en Conexiones y vuelve a conectar Google Drive.")
+            crear_aviso(tenant_id, "drive_desconectado", f"{e}. Entre en Conexiones y vuelva a conectar Google Drive.")
             return
         if storage is None:
             return
@@ -63,7 +63,7 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
                 log.exception("Correo %s: falló %d veces; se aparta y se avisa a la gestoría", mensaje_id, intentos)
                 crear_aviso(tenant_id, "correo_fallido",
                             "No se ha podido procesar un correo después de 3 intentos y se ha dejado de reintentar. "
-                            "Revisa en tu Gmail el correo con facturas de esa fecha y súbelas a mano si hace falta. "
+                            "Revise en su Gmail el correo con facturas de esa fecha y súbalas a mano si hace falta. "
                             f"({type(e).__name__})")
                 marcar_correo_procesado(tenant_id, mensaje_id)
                 max_ok = max(max_ok or 0, f)

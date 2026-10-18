@@ -222,8 +222,8 @@ def _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, fac
             donde = "una carpeta de Agente Facturas (por ejemplo «Sin identificar»)"
         crear_aviso(
             tenant_id, "carpeta_recreada",
-            f"Faltaba {donde} en tu almacenamiento (OneDrive o Google Drive): se borró o se movió. El agente la ha vuelto a crear. "
-            "Lo que había dentro no se recupera solo: puedes buscarlo en la papelera de tu OneDrive o Google Drive.",
+            f"Faltaba {donde} en su almacenamiento (OneDrive o Google Drive): se borró o se movió. El agente la ha vuelto a crear. "
+            "Lo que había dentro no se recupera solo: puede buscarlo en la papelera de su OneDrive o Google Drive.",
         )
         return _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir, forzar_revision)
 

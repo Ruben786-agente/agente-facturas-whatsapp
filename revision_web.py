@@ -9,8 +9,9 @@ import logging
 from flask import Blueprint, request, redirect, session, render_template_string, url_for, flash
 
 from almacenamiento_tenant import storage_para_tenant
-from basededatos import (marcar_revisada, obtener_carpeta_sin_identificar,
+from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_carpeta_sin_identificar,
                          obtener_revision, resolver_sin_identificar)
+from estilo_web import pagina
 from panel_web import login_requerido
 from procesamiento import reprocesar_revision
 
@@ -97,56 +98,59 @@ def abrir_sin_identificar():
 # Corregir y añadir al Excel
 # ---------------------------------------------------------------------------
 
-PLANTILLA_CORREGIR = """
-<!doctype html><html lang="es"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Corregir factura - Agente Facturas</title>
+CSS_CORREGIR = """
 <style>
-  body { font-family: Arial, sans-serif; background: #f4f5f7; margin: 0; padding: 2rem; color: #222; }
-  .caja { background: white; padding: 1.5rem 2rem; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08); max-width: 860px; }
-  label { display: block; font-size: .85em; color: #555; margin-top: 10px; }
-  input { padding: 7px; box-sizing: border-box; width: 100%; }
-  .fila { display: flex; gap: 12px; flex-wrap: wrap; }
-  .fila > div { flex: 1; min-width: 140px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
-  td, th { padding: 4px; font-size: .85em; text-align: left; }
-  button { padding: 10px 18px; background: #2d6cdf; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 16px; }
-  .motivo { background: #fdecea; padding: 10px 14px; border-radius: 4px; }
-  .error { background: #fff4e5; padding: 10px 14px; border-radius: 4px; margin-top: 10px; }
-</style></head><body>
-<div class="caja">
-  <p><a href="{{ url_for('panel.panel') }}">&larr; Volver al panel</a> ·
-     <a href="{{ url_for('revision.abrir_revision', factura_id=factura_id) }}" target="_blank">Ver el original</a></p>
-  <h2>Corregir factura de {{ empresa }}</h2>
-  <p class="motivo">Motivo de la revisión: <strong>{{ motivo }}</strong></p>
-  {% if error %}<p class="error">Sigue sin poder añadirse: <strong>{{ error }}</strong>. Revisa los importes.</p>{% endif %}
-  <form method="post">
+  .volver { display: inline-block; margin-bottom: 18px; text-decoration: none; color: var(--tinta-2); }
+  .volver:hover { color: var(--marca); }
+  .motivo { margin: 18px 0 0; }
+  .formulario { margin-top: 24px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; padding: 8px 28px 28px; }
+  .fila { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 18px; }
+  .desglose { width: 100%; min-width: 0; border-collapse: separate; border-spacing: 0 6px; margin-top: 4px; }
+  .desglose th { padding: 4px 6px 2px; border: 0; }
+  .desglose td { padding: 0 6px 0 0; border: 0; }
+  .desglose input { padding: 8px 10px; }
+  .desglose-envoltorio { overflow-x: auto; }
+  .desglose-envoltorio .desglose { min-width: 560px; }
+  .pie-formulario { display: flex; gap: 12px; align-items: center; margin-top: 22px; flex-wrap: wrap; }
+</style>
+"""
+
+PLANTILLA_CORREGIR = pagina("Corregir factura", """
+<main class="pagina estrecha" style="max-width:860px;">
+  <a class="volver" href="{{ url_for('panel.panel') }}">&larr; Volver al panel</a>
+  <h1 style="font-size:36px;">Corregir factura de {{ empresa }}</h1>
+  <p class="alerta motivo">Motivo de la revisión: <strong>{{ motivo }}</strong></p>
+  {% if error %}<p class="alerta error" role="alert">Sigue sin poder añadirse: <strong>{{ error }}</strong>. Revise los importes.</p>{% endif %}
+  <form class="formulario" method="post">
     <div class="fila">
-      <div><label>Fecha (dd/mm/aaaa)</label><input name="fecha" value="{{ v.fecha }}" required></div>
-      <div><label>Nº de factura</label><input name="numero" value="{{ v.numero }}" required></div>
-      <div><label>Total factura (€)</label><input name="total" value="{{ v.total }}" required></div>
+      <div><label for="fecha">Fecha (dd/mm/aaaa)</label><input id="fecha" name="fecha" value="{{ v.fecha }}" required></div>
+      <div><label for="numero">Nº de factura</label><input id="numero" name="numero" value="{{ v.numero }}" required></div>
+      <div><label for="total">Total factura (€)</label><input id="total" name="total" value="{{ v.total }}" required inputmode="decimal"></div>
     </div>
     <div class="fila">
-      <div><label>Proveedor</label><input name="emisor_nombre" value="{{ v.emisor_nombre }}"></div>
-      <div><label>CIF del proveedor</label><input name="emisor_cif" value="{{ v.emisor_cif }}"></div>
+      <div><label for="emisor_nombre">Proveedor</label><input id="emisor_nombre" name="emisor_nombre" value="{{ v.emisor_nombre }}"></div>
+      <div><label for="emisor_cif">CIF del proveedor</label><input id="emisor_cif" name="emisor_cif" value="{{ v.emisor_cif }}"></div>
     </div>
-    <label>Desglose por tipo de IVA (deja en blanco las filas que no uses)</label>
-    <table>
+    <label>Desglose por tipo de IVA <small>(deje en blanco las filas que no use)</small></label>
+    <div class="desglose-envoltorio"><table class="desglose">
       <tr><th>Base</th><th>% IVA</th><th>Cuota IVA</th><th>Cuota recargo</th><th>Cuota retención</th></tr>
       {% for d in v.desgloses %}
       <tr>
-        <td><input name="base{{ loop.index0 }}" value="{{ d.base }}"></td>
-        <td><input name="pct_iva{{ loop.index0 }}" value="{{ d.pct_iva }}"></td>
-        <td><input name="cuota_iva{{ loop.index0 }}" value="{{ d.cuota_iva }}"></td>
-        <td><input name="cuota_recargo{{ loop.index0 }}" value="{{ d.cuota_recargo }}"></td>
-        <td><input name="cuota_retencion{{ loop.index0 }}" value="{{ d.cuota_retencion }}"></td>
+        <td><input name="base{{ loop.index0 }}" value="{{ d.base }}" inputmode="decimal" aria-label="Base, fila {{ loop.index }}"></td>
+        <td><input name="pct_iva{{ loop.index0 }}" value="{{ d.pct_iva }}" inputmode="decimal" aria-label="Porcentaje de IVA, fila {{ loop.index }}"></td>
+        <td><input name="cuota_iva{{ loop.index0 }}" value="{{ d.cuota_iva }}" inputmode="decimal" aria-label="Cuota de IVA, fila {{ loop.index }}"></td>
+        <td><input name="cuota_recargo{{ loop.index0 }}" value="{{ d.cuota_recargo }}" inputmode="decimal" aria-label="Cuota de recargo, fila {{ loop.index }}"></td>
+        <td><input name="cuota_retencion{{ loop.index0 }}" value="{{ d.cuota_retencion }}" inputmode="decimal" aria-label="Cuota de retención, fila {{ loop.index }}"></td>
       </tr>
       {% endfor %}
-    </table>
-    <button type="submit">Añadir al Excel</button>
+    </table></div>
+    <div class="pie-formulario">
+      <button class="btn principal grande" type="submit">Añadir al Excel</button>
+      <a class="btn" href="{{ url_for('revision.abrir_revision', factura_id=factura_id) }}" target="_blank" rel="noopener">Ver el original</a>
+    </div>
   </form>
-</div></body></html>
-"""
+</main>
+""", extra_head=CSS_CORREGIR)
 
 
 def _valores_formulario(factura):
@@ -217,10 +221,11 @@ def corregir(factura_id):
                 return redirect(url_for("panel.panel"))
             error = res.get("motivo") or "no se pudo añadir"
         except ValueError as e:
-            error = str(e) or "revisa que los números estén bien escritos"
+            error = str(e) or "revise que los números estén bien escritos"
         except Exception:
             log.exception("Fallo corrigiendo la factura %s", factura_id)
-            error = "ha habido un problema al guardar en tu almacenamiento; inténtalo de nuevo"
+            error = "ha habido un problema al guardar en su almacenamiento; inténtelo de nuevo"
 
     return render_template_string(PLANTILLA_CORREGIR, factura_id=factura_id, empresa=r["empresa"]["nombre"],
-                                  motivo=r["motivo"] or "-", v=valores, error=error)
+                                  motivo=r["motivo"] or "-", v=valores, error=error,
+                                  gestoria_nombre=obtener_estado_conexiones(tenant_id)["nombre"])
