@@ -91,6 +91,11 @@ def ciclo_correo():
             _procesar_tenant(tenant_id)
         except Exception:
             log.exception("Error en el correo de la gestoría %s", tenant_id)
+    try:  # una vez al día, avisos del plazo del modelo 303 por correo electrónico
+        from notificaciones import revisar_plazos
+        revisar_plazos()
+    except Exception:
+        log.exception("Error revisando los plazos")
 
 
 def ejecutar_en_bucle():

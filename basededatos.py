@@ -3,6 +3,7 @@
 Capa de acceso a la base de datos central (Postgres en producción).
 """
 
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -12,6 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import uuid
+log = logging.getLogger("basededatos")
 from cryptography.fernet import Fernet
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -155,6 +157,18 @@ class Aviso(Base):
     mensaje = Column(String, nullable=False)
     visto = Column(Boolean, nullable=False, default=False)
     creado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+TENANT_GLOBAL = "global"  # para marcas que no son de ninguna gestoría en concreto
+
+
+class NotificacionEnviada(Base):
+    """Registro de correos de aviso ya enviados (para no repetirlos)."""
+    __tablename__ = "notificaciones_enviadas"
+    id = _uuid_column()
+    tenant_id = Column(String(36), nullable=False)
+    clave = Column(String, nullable=False)
+    enviada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 _engine = None
@@ -548,6 +562,7 @@ def guardar_estado_correo(tenant_id, ultimo_mensaje_ts=None, error=None):
         if e is None:
             e = EstadoCorreo(tenant_id=tenant_id)
             session.add(e)
+        error_anterior = e.error
         if ultimo_mensaje_ts is not None:
             e.ultimo_mensaje_ts = ultimo_mensaje_ts
         e.error = error
@@ -555,6 +570,12 @@ def guardar_estado_correo(tenant_id, ultimo_mensaje_ts=None, error=None):
         session.commit()
     finally:
         session.close()
+    if error and error != error_anterior:  # el correo acaba de desconectarse: se avisa por correo
+        try:
+            from notificaciones import notificar_correo_desconectado
+            notificar_correo_desconectado(tenant_id, error)
+        except Exception:
+            log.exception("No se pudo enviar el aviso de correo desconectado")
 
 
 def registrar_intento_fallido(tenant_id, mensaje_id, error=""):
@@ -732,7 +753,7 @@ def _trimestre_en_plazo(hoy):
 MINUTOS_POR_DOCUMENTO = 3  # tiempo que se estima que ahorra cada factura leída y archivada
 
 
-def obtener_resumen_panel(tenant_id, trimestre=None):
+def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
     """
     Para el panel de la gestoría:
       - resumen: cuántos documentos hay en cada estado (de todo el histórico),
@@ -806,7 +827,7 @@ def obtener_resumen_panel(tenant_id, trimestre=None):
             else:
                 g["estado"] = "SIN_FACTURAS"
 
-        plazo = _trimestre_en_plazo(date.today())
+        plazo = _trimestre_en_plazo(hoy_fecha or date.today())
         if plazo:
             del_trim = [g for g in todos if (g["anio"], g["trimestre"]) == (plazo["anio"], plazo["trimestre"])]
             plazo["clientes"] = len(del_trim)
@@ -952,7 +973,46 @@ def crear_aviso(tenant_id, tipo, mensaje):
             return False
         session.add(Aviso(tenant_id=tenant_id, tipo=tipo, mensaje=mensaje))
         session.commit()
-        return True
+    finally:
+        session.close()
+    try:  # además del panel, aviso por correo (si está configurado y no es solo informativo)
+        from notificaciones import notificar_aviso
+        notificar_aviso(tenant_id, tipo, mensaje)
+    except Exception:
+        log.exception("No se pudo enviar el aviso por correo")
+    return True
+
+
+def email_de_gestoria(tenant_id):
+    session = _obtener_session()
+    try:
+        g = session.get(Gestoria, tenant_id)
+        return g.email_contacto if g and g.activa else None
+    finally:
+        session.close()
+
+
+def notificacion_reciente(tenant_id, clave, horas):
+    """True si ya se envió un correo con esa clave hace menos de `horas` horas."""
+    session = _obtener_session()
+    try:
+        desde = datetime.now(timezone.utc) - timedelta(hours=horas)
+        return session.query(NotificacionEnviada).filter(
+            NotificacionEnviada.tenant_id == tenant_id, NotificacionEnviada.clave == clave,
+            NotificacionEnviada.enviada_en >= desde).first() is not None
+    finally:
+        session.close()
+
+
+def registrar_notificacion(tenant_id, clave):
+    session = _obtener_session()
+    try:
+        session.add(NotificacionEnviada(tenant_id=tenant_id, clave=clave))
+        session.commit()
+        # limpieza: lo de hace más de 120 días ya no hace falta
+        session.query(NotificacionEnviada).filter(
+            NotificacionEnviada.enviada_en < datetime.now(timezone.utc) - timedelta(days=120)).delete()
+        session.commit()
     finally:
         session.close()
 
