@@ -14,7 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import uuid
 log = logging.getLogger("basededatos")
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from werkzeug.security import generate_password_hash, check_password_hash
 
 Base = declarative_base()
@@ -426,7 +426,17 @@ def obtener_refresh_token(tenant_id, proveedor):
     session = _obtener_session()
     try:
         cred = session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id, proveedor=proveedor).first()
-        return descifrar_refresh_token(cred.refresh_token_cifrado) if cred else None
+        if not cred:
+            return None
+        try:
+            return descifrar_refresh_token(cred.refresh_token_cifrado)
+        except InvalidToken:
+            # Se guardó con otra clave de cifrado: ya no se puede leer nunca. Se borra para que figure como
+            # desconectada y la gestoría pueda volver a conectarla.
+            log.warning("Credencial %s de %s ilegible (clave de cifrado distinta): se borra", proveedor, tenant_id)
+            session.delete(cred)
+            session.commit()
+            return None
     finally:
         session.close()
 
@@ -474,7 +484,10 @@ def eliminar_credencial(tenant_id, proveedor):
         cred = session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id, proveedor=proveedor).first()
         if cred is None:
             return None
-        token = descifrar_refresh_token(cred.refresh_token_cifrado)
+        try:
+            token = descifrar_refresh_token(cred.refresh_token_cifrado)
+        except InvalidToken:
+            token = None
         session.delete(cred)
         if proveedor in ("onedrive", "gdrive"):
             g = session.get(Gestoria, tenant_id)
