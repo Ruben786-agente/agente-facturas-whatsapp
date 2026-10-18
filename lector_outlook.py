@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Lee correos nuevos con adjuntos de Outlook / Microsoft 365 (Microsoft Graph) y extrae solo los que pueden ser facturas/tickets.
 Misma interfaz que LectorGmail: mensajes_nuevos(desde_ts) y adjuntos_utiles(mensaje_id)."""
-import base64
 from datetime import datetime, timezone
 
 import requests
@@ -72,12 +71,14 @@ class LectorOutlook:
         msg = self._get(f"/messages/{mensaje_id}", **{"$select": "receivedDateTime"})
         fecha = _a_epoch(msg.get("receivedDateTime"))
         resultado, url = [], f"/messages/{mensaje_id}/attachments"
-        params = {"$select": "id,name,contentType,size,isInline,contentBytes"}
+        # Solo propiedades comunes a todos los tipos de adjunto (contentBytes solo existe en los archivos y Graph rechaza pedirlo aquí);
+        # el contenido de los que interesan se baja después, uno a uno, como archivo.
+        params = {"$select": "id,name,contentType,size,isInline"}
         while url:
             datos = self._get(url, **(params or {}))
             params = None
             for adj in datos.get("value", []):
-                if adj.get("@odata.type") != "#microsoft.graph.fileAttachment":
+                if adj.get("@odata.type", "#microsoft.graph.fileAttachment") != "#microsoft.graph.fileAttachment":
                     continue  # p. ej. un correo adjunto o un enlace a la nube
                 nombre = adj.get("name") or ""
                 ext = _ext(nombre)
@@ -85,12 +86,8 @@ class LectorOutlook:
                     continue
                 if ext != ".pdf" and (adj.get("isInline") or adj.get("size", 0) < MIN_BYTES_IMAGEN):
                     continue  # logos y firmas
-                contenido = adj.get("contentBytes")
-                if contenido:
-                    resultado.append((nombre, base64.b64decode(contenido)))
-                else:  # adjuntos grandes: Graph no incluye el contenido en la lista
-                    r = requests.get(f"{API}/messages/{mensaje_id}/attachments/{adj['id']}/$value", headers=self._h, timeout=120)
-                    r.raise_for_status()
-                    resultado.append((nombre, r.content))
+                r = requests.get(f"{API}/messages/{mensaje_id}/attachments/{adj['id']}/$value", headers=self._h, timeout=120)
+                r.raise_for_status()
+                resultado.append((nombre, r.content))
             url = datos.get("@odata.nextLink")
         return fecha, resultado
