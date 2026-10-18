@@ -37,7 +37,11 @@ def _ejecutar_ciclo():
 @bp_tareas.route("/tareas/correo")
 def tarea_correo():
     esperada = os.environ.get("TAREAS_CLAVE", "")
-    recibida = request.args.get("clave", "")
+    # La clave debe viajar en una cabecera (X-Clave): así no aparece en los logs de Render.
+    # Mientras se migra, la dirección con ?clave=... sigue funcionando; ponga CLAVE_EN_URL=0 para apagarla.
+    recibida = request.headers.get("X-Clave", "")
+    if not recibida and os.environ.get("CLAVE_EN_URL", "1") != "0":
+        recibida = request.args.get("clave", "")
     if not esperada or not hmac.compare_digest(esperada.encode(), recibida.encode()):
         return "No autorizado", 403
 
