@@ -245,7 +245,10 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
     factura = {**factura, "destinatario": {**destinatario, "cif_nif": cif}}
 
     if factura.get("confianza") != "baja":
-        alta_empresa_cliente(storage, tenant_id, (destinatario.get("nombre") or "").strip() or cif, cif)
+        nombre_empresa = (destinatario.get("nombre") or "").strip() or cif
+        if alta_empresa_cliente(storage, tenant_id, nombre_empresa, cif).get("nueva"):
+            crear_aviso(tenant_id, "empresa_nueva",
+                        f"{nombre_empresa} ({cif})")
     empresa = resolver_empresa_cliente_por_cif(tenant_id, [cif])
     if not empresa:
         if diferir:

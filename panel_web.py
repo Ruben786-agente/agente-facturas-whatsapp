@@ -10,7 +10,7 @@ from functools import wraps
 
 from flask import Blueprint, request, redirect, session, render_template_string, url_for, get_flashed_messages
 
-from basededatos import verificar_login, obtener_resumen_panel, obtener_estado_conexiones, obtener_avisos, marcar_avisos_vistos
+from basededatos import verificar_login, obtener_resumen_panel, obtener_estado_conexiones, obtener_avisos, marcar_avisos_vistos, TIPOS_AVISO_INFORMATIVO
 from estilo_web import acceso, eur, pagina
 
 bp_panel = Blueprint("panel", __name__)
@@ -56,6 +56,8 @@ CSS_PANEL = """
   @media (prefers-reduced-motion: reduce) { .pista > span { animation: none; } }
 
   /* Cifras */
+  .sin-envios { margin: 22px 0 0; color: var(--tinta-2); max-width: 80ch; }
+  .sin-envios strong { color: var(--tinta); font-weight: 600; }
   .cifras { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; margin-top: 36px; background: var(--linea);
             border: 1px solid var(--linea); border-radius: 10px; overflow: hidden; }
   .cifra { background: var(--superficie); padding: 20px 22px 18px; }
@@ -80,10 +82,19 @@ PLANTILLA_PANEL = pagina("Panel", """
 <main class="pagina">
   {% for m in mensajes %}<p class="mensaje" role="status">{{ m }}</p>{% endfor %}
 
+  {% if avisos_info %}
+  <div class="alerta info">
+    <p>{% if avisos_info|length == 1 %}Empresa nueva detectada: <strong>{{ avisos_info[0].mensaje }}</strong>. Se ha creado su carpeta;
+      revise su primera factura por si el nombre o el CIF no son los esperados.
+      {% else %}{{ avisos_info|length }} empresas nuevas detectadas: <strong>{{ avisos_info|map(attribute='mensaje')|join(', ') }}</strong>.
+      Se han creado sus carpetas; revise la primera factura de cada una por si el nombre o el CIF no son los esperados.{% endif %}</p>
+    <form method="post" action="{{ url_for('panel.avisos_vistos', grupo='info') }}"><button class="btn" type="submit">Entendido</button></form>
+  </div>
+  {% endif %}
   {% if avisos %}
   <div class="alerta error">
     {% for a in avisos %}<p>{{ a.mensaje }} <small>({{ a.creado_en.strftime("%d/%m/%Y %H:%M") }})</small></p>{% endfor %}
-    <form method="post" action="{{ url_for('panel.avisos_vistos') }}"><button class="btn" type="submit">Entendido</button></form>
+    <form method="post" action="{{ url_for('panel.avisos_vistos', grupo='alertas') }}"><button class="btn" type="submit">Entendido</button></form>
   </div>
   {% endif %}
   {% if aviso %}
@@ -109,6 +120,12 @@ PLANTILLA_PANEL = pagina("Panel", """
   </section>
   {% else %}
   <section class="cierre"><div><h1>Panel de facturas</h1><p class="sub">Lo que el agente ha leído y lo que necesita que mires.</p></div></section>
+  {% endif %}
+
+  {% if plazo and plazo.sin_facturas %}
+  <p class="sin-envios"><strong>Sin facturas del {{ plazo.trimestre }}T {{ plazo.anio }}:</strong>
+    {% set lista = plazo.sin_facturas[:6]|join(", ") %}{{ lista }}{% if plazo.sin_facturas|length > 6 %} y {{ plazo.sin_facturas|length - 6 }} más{% endif %}{% if not lista.endswith(".") or plazo.sin_facturas|length > 6 %}.{% endif %}
+    Todavía no han enviado ninguna factura de este trimestre.</p>
   {% endif %}
 
   <section class="cifras" aria-label="Resumen">
@@ -213,15 +230,17 @@ def panel():
     e = obtener_estado_conexiones(session["tenant_id"])
     aviso = e["correo_error"] or (None if e["almacenamiento"] else "Falta conectar OneDrive o Google Drive.") \
         or (None if e["correo"] else "Falta conectar su correo (Gmail u Outlook).")
+    todos_avisos = obtener_avisos(session["tenant_id"])
     return render_template_string(
         PLANTILLA_PANEL, resumen=datos["resumen"], atencion=datos["atencion"], clientes=datos["clientes"],
         trimestres=datos["trimestres"], plazo=datos["plazo"], ahorro=datos["ahorro"], filtro=filtro, aviso=aviso,
         mensajes=get_flashed_messages(), gestoria_nombre=e["nombre"],
-        avisos=obtener_avisos(session["tenant_id"]))
+        avisos=[a for a in todos_avisos if a["tipo"] not in TIPOS_AVISO_INFORMATIVO],
+        avisos_info=[a for a in todos_avisos if a["tipo"] in TIPOS_AVISO_INFORMATIVO])
 
 
 @bp_panel.route("/avisos/vistos", methods=["POST"])
 @login_requerido
 def avisos_vistos():
-    marcar_avisos_vistos(session["tenant_id"])
+    marcar_avisos_vistos(session["tenant_id"], grupo=request.args.get("grupo"))
     return redirect(url_for("panel.panel"))

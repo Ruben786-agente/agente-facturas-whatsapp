@@ -73,6 +73,7 @@ CSS = """
   .mensaje { border-left-color: var(--ok); }
   .alerta { border-left-color: var(--aviso); }
   .alerta.error { border-left-color: var(--error); }
+  .alerta.info { border-left-color: var(--marca); }
   .alerta p { margin: 0 0 6px; }
   .alerta p:last-of-type { margin-bottom: 0; }
   .alerta .btn { margin-top: 10px; }

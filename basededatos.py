@@ -811,6 +811,10 @@ def obtener_resumen_panel(tenant_id, trimestre=None):
             del_trim = [g for g in todos if (g["anio"], g["trimestre"]) == (plazo["anio"], plazo["trimestre"])]
             plazo["clientes"] = len(del_trim)
             plazo["con_revision"] = sum(1 for g in del_trim if g["revision"])
+            con_facturas = {g["cif"] for g in del_trim}
+            plazo["sin_facturas"] = sorted(
+                e.nombre for e in session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, activa=True)
+                if e.cif_nif not in con_facturas)
         minutos = docs_mes * MINUTOS_POR_DOCUMENTO
         ahorro = {"documentos": docs_mes, "minutos_por_doc": MINUTOS_POR_DOCUMENTO,
                   "horas": minutos // 60, "minutos": minutos % 60}
@@ -962,10 +966,19 @@ def obtener_avisos(tenant_id):
         session.close()
 
 
-def marcar_avisos_vistos(tenant_id):
+TIPOS_AVISO_INFORMATIVO = ("empresa_nueva",)  # no son un problema: solo informan de algo que ha hecho el agente
+
+
+def marcar_avisos_vistos(tenant_id, grupo=None):
+    """grupo: 'info' (solo los informativos), 'alertas' (solo los que son un problema) o None (todos)."""
     session = _obtener_session()
     try:
-        session.query(Aviso).filter_by(tenant_id=tenant_id, visto=False).update({"visto": True})
+        q = session.query(Aviso).filter_by(tenant_id=tenant_id, visto=False)
+        if grupo == "info":
+            q = q.filter(Aviso.tipo.in_(TIPOS_AVISO_INFORMATIVO))
+        elif grupo == "alertas":
+            q = q.filter(~Aviso.tipo.in_(TIPOS_AVISO_INFORMATIVO))
+        q.update({"visto": True}, synchronize_session=False)
         session.commit()
     finally:
         session.close()
