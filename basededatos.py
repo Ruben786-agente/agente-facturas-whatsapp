@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     create_engine, Column, String, Boolean, DateTime, Numeric, Date, LargeBinary, ForeignKey,
-    BigInteger, UniqueConstraint, Text, Integer
+    BigInteger, UniqueConstraint, Text, Integer, func
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import uuid
@@ -171,6 +171,15 @@ class NotificacionEnviada(Base):
     enviada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class IntentoLogin(Base):
+    """Intentos fallidos de entrada, para bloquear un rato a quien prueba contraseñas."""
+    __tablename__ = "intentos_login"
+    clave = Column(String, primary_key=True)
+    fallos = Column(Integer, nullable=False, default=0)
+    primero_en = Column(DateTime(timezone=True))
+    bloqueado_hasta = Column(DateTime(timezone=True))
+
+
 _engine = None
 _Session = None
 
@@ -181,7 +190,7 @@ def _obtener_session():
         # Solo se guarda el resultado si TODO ha ido bien; si la base de datos
         # estaba caída o pausada, la siguiente petición vuelve a intentarlo.
         url = os.environ.get("DATABASE_URL", "sqlite:///local_prueba.db")
-        motor = create_engine(url, pool_pre_ping=True)
+        motor = create_engine(url, pool_pre_ping=True, hide_parameters=True)
         Base.metadata.create_all(motor)
         _engine = motor
         _Session = sessionmaker(bind=motor)
@@ -225,12 +234,82 @@ def verificar_login(email, password_en_claro):
     """Devuelve tenant_id si el email+contraseña son correctos, None si no."""
     session = _obtener_session()
     try:
-        g = session.query(Gestoria).filter_by(email_contacto=email).first()
+        g = session.query(Gestoria).filter(func.lower(Gestoria.email_contacto) == (email or "").strip().lower()).first()
         if not g or not g.password_hash:
             return None
         if check_password_hash(g.password_hash, password_en_claro):
             return g.tenant_id
         return None
+    finally:
+        session.close()
+
+
+def login_bloqueado(clave):
+    """Segundos que faltan para poder volver a intentarlo (0 si no está bloqueado)."""
+    session = _obtener_session()
+    try:
+        r = session.get(IntentoLogin, clave)
+        if r and r.bloqueado_hasta:
+            falta = (_como_aware_utc(r.bloqueado_hasta) - datetime.now(timezone.utc)).total_seconds()
+            return int(falta) if falta > 0 else 0
+        return 0
+    finally:
+        session.close()
+
+
+def registrar_fallo_login(clave, maximo=8, ventana_min=15, bloqueo_min=15):
+    """Cuenta un intento fallido; al llegar al máximo dentro de la ventana, bloquea esa clave unos minutos."""
+    session = _obtener_session()
+    try:
+        ahora = datetime.now(timezone.utc)
+        r = session.get(IntentoLogin, clave)
+        if r is None:
+            r = IntentoLogin(clave=clave, fallos=0, primero_en=ahora)
+            session.add(r)
+        if r.primero_en is None or _como_aware_utc(r.primero_en) < ahora - timedelta(minutes=ventana_min):
+            r.fallos, r.primero_en = 0, ahora
+        r.fallos = (r.fallos or 0) + 1
+        if r.fallos >= maximo:
+            r.bloqueado_hasta = ahora + timedelta(minutes=bloqueo_min)
+            r.fallos, r.primero_en = 0, ahora
+        session.commit()
+    finally:
+        session.close()
+
+
+def limpiar_fallos_login(clave):
+    session = _obtener_session()
+    try:
+        r = session.get(IntentoLogin, clave)
+        if r:
+            session.delete(r)
+            session.commit()
+    finally:
+        session.close()
+
+
+def obtener_suscripcion_stripe(tenant_id):
+    session = _obtener_session()
+    try:
+        g = session.get(Gestoria, tenant_id)
+        return g.stripe_subscription_id if g else None
+    finally:
+        session.close()
+
+
+def eliminar_gestoria(tenant_id):
+    """Borra la gestoría y TODOS sus datos (empresas, facturas, avisos, conexiones...). No toca sus archivos en OneDrive/Drive."""
+    session = _obtener_session()
+    try:
+        ids_empresas = [e.id for e in session.query(EmpresaCliente.id).filter_by(tenant_id=tenant_id)]
+        if ids_empresas:
+            session.query(EstadoSondeo).filter(EstadoSondeo.empresa_cliente_id.in_(ids_empresas)).delete(synchronize_session=False)
+        for modelo in (FacturaCache, CorreoProcesado, CorreoIntento, DocumentoVisto, EstadoCorreo,
+                       DocumentoSinIdentificar, Aviso, NotificacionEnviada, NumeroWhatsapp,
+                       CredencialAlmacenamiento, EmpresaCliente):
+            session.query(modelo).filter_by(tenant_id=tenant_id).delete(synchronize_session=False)
+        session.query(Gestoria).filter_by(tenant_id=tenant_id).delete(synchronize_session=False)
+        session.commit()
     finally:
         session.close()
 

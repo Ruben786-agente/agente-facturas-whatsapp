@@ -19,10 +19,12 @@ import autenticacion_google as google
 import autenticacion_onedrive as microsoft
 from almacenamiento import obtener_almacenamiento
 from basededatos import (crear_gestoria_prueba, establecer_password, existe_email_gestoria,
-                         guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial)
+                         guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial,
+                         eliminar_gestoria, email_de_gestoria, obtener_suscripcion_stripe, verificar_login)
 from onboarding import preparar_gestoria, reconstruir_carpetas_empresas
 from estilo_web import acceso, pagina
 from panel_web import login_requerido
+from seguridad import contrasena_debil
 
 log = logging.getLogger("alta_web")
 bp_alta = Blueprint("alta", __name__)
@@ -37,8 +39,37 @@ PLANTILLA_REGISTRO = acceso("Crear cuenta", """
     <input id="nombre" name="nombre" autocomplete="organization" required autofocus>
     <label for="email">Email</label>
     <input id="email" type="email" name="email" autocomplete="email" required>
-    <label for="password">Contraseña (mínimo 8 caracteres)</label>
+    <label for="password">Contraseña</label>
     <input id="password" type="password" name="password" autocomplete="new-password" required minlength="8">
+    <ul id="reglas" style="list-style:none;margin:10px 0 0;padding:0;font-size:14px;line-height:1.7;color:var(--tinta-3);">
+      <li data-r="largo"><span>○</span> Al menos 8 caracteres</li>
+      <li data-r="mayus"><span>○</span> Una mayúscula</li>
+      <li data-r="minus"><span>○</span> Una minúscula</li>
+      <li data-r="num"><span>○</span> Un número</li>
+      <li data-r="simbolo"><span>○</span> Un símbolo (por ejemplo ! ? - _ . @ #)</li>
+    </ul>
+    <p class="tenue" style="font-size:14px;margin:8px 0 0;">Truco: junte dos o tres palabras con guiones y añada un número y un signo, por ejemplo <em>Coche-verde7!</em> (invente la suya). Es fácil de recordar y difícil de adivinar.</p>
+    <script>
+      (function () {
+        var campo = document.getElementById("password");
+        var pruebas = {
+          largo: function (p) { return p.length >= 8; },
+          mayus: function (p) { return /[A-ZÁÉÍÓÚÑÜ]/.test(p); },
+          minus: function (p) { return /[a-záéíóúñü]/.test(p); },
+          num: function (p) { return /[0-9]/.test(p); },
+          simbolo: function (p) { return /[^A-Za-z0-9ÁÉÍÓÚÑÜáéíóúñü]/.test(p); }
+        };
+        function revisar() {
+          var items = document.querySelectorAll("#reglas li");
+          for (var i = 0; i < items.length; i++) {
+            var cumple = pruebas[items[i].getAttribute("data-r")](campo.value);
+            items[i].style.color = cumple ? "var(--ok)" : "";
+            items[i].firstChild.textContent = cumple ? "✓" : "○";
+          }
+        }
+        campo.addEventListener("input", revisar);
+      })();
+    </script>
     {% if error %}<p class="error-texto" role="alert">{{ error }}</p>{% endif %}
     <button class="btn principal grande" type="submit">Crear cuenta</button>
   </form>
@@ -135,6 +166,16 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
   {% endif %}
 
   <p style="margin-top:28px;"><a class="btn" href="{{ url_for('panel.panel') }}">Ir al panel</a></p>
+
+  <details style="margin-top:36px;max-width:640px;">
+    <summary class="tenue" style="cursor:pointer;">Eliminar mi cuenta y mis datos</summary>
+    <form method="post" action="{{ url_for('alta.eliminar_cuenta') }}" style="margin-top:14px;">
+      <p class="tenue">Se borran su cuenta, las conexiones y todo lo que el agente tiene guardado de sus clientes (facturas leídas, avisos...). <strong>Los archivos de su OneDrive o Google Drive no se tocan</strong>: siguen siendo suyos. Si tiene una suscripción, se cancela. No se puede deshacer.</p>
+      <label for="password_borrar">Escriba su contraseña para confirmar</label>
+      <input id="password_borrar" type="password" name="password" autocomplete="current-password" required>
+      <button class="btn" type="submit" style="margin-top:12px;">Eliminar definitivamente</button>
+    </form>
+  </details>
 </main>
 """, activa="conexiones", extra_head=CSS_CONEXIONES)
 
@@ -160,8 +201,8 @@ def registro():
         error = None
         if not nombre or not _EMAIL.match(email):
             error = "Revise el nombre y el email."
-        elif len(password) < 8:
-            error = "La contraseña debe tener al menos 8 caracteres."
+        elif contrasena_debil(password, email):
+            error = contrasena_debil(password, email)
         elif existe_email_gestoria(email):
             error = "Ya existe una cuenta con ese email."
         if error:
@@ -317,6 +358,34 @@ def desconectar(proveedor):
         google.revocar_token(token)
     log.info("Gestoría %s desconectó %s", session["tenant_id"], proveedor)
     return redirect(url_for("alta.conexiones", ok=f"{_NOMBRES[proveedor]} desconectado."))
+
+
+@bp_alta.route("/cuenta/eliminar", methods=["POST"])
+@login_requerido
+def eliminar_cuenta():
+    tenant_id = session["tenant_id"]
+    if not verificar_login(email_de_gestoria(tenant_id) or "", request.form.get("password", "")):
+        return redirect(url_for("alta.conexiones", error="La contraseña no es correcta. No se ha borrado nada."))
+    suscripcion = obtener_suscripcion_stripe(tenant_id)
+    if suscripcion:
+        try:
+            from stripe_integracion import cancelar_suscripcion
+            cancelar_suscripcion(suscripcion)
+        except Exception:
+            log.exception("No se pudo cancelar la suscripción al eliminar la cuenta %s", tenant_id)
+            return redirect(url_for("alta.conexiones", error="No hemos podido cancelar su suscripción, así que no se ha borrado nada. Inténtelo de nuevo en unos minutos."))
+    for proveedor in ("gmail", "gdrive"):
+        try:
+            token = eliminar_credencial(tenant_id, proveedor)
+            if token:
+                google.revocar_token(token)
+        except Exception:
+            log.exception("No se pudo anular el acceso de %s al eliminar la cuenta", proveedor)
+    eliminar_gestoria(tenant_id)
+    session.clear()
+    log.info("Cuenta %s eliminada por su titular", tenant_id)
+    return render_template_string(PLANTILLA_ADMIN, titulo="Cuenta eliminada",
+                                  texto="Hemos borrado su cuenta y todos los datos que el agente guardaba. Los archivos de su OneDrive o Google Drive no se han tocado. Gracias por probar el servicio.")
 
 
 @bp_alta.route("/suscribirme")

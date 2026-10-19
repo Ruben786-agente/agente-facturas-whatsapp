@@ -10,7 +10,8 @@ from functools import wraps
 
 from flask import Blueprint, request, redirect, session, render_template_string, url_for, get_flashed_messages
 
-from basededatos import verificar_login, obtener_resumen_panel, obtener_estado_conexiones, obtener_avisos, marcar_avisos_vistos, TIPOS_AVISO_INFORMATIVO
+from basededatos import (login_bloqueado, registrar_fallo_login, limpiar_fallos_login,
+                         verificar_login, obtener_resumen_panel, obtener_estado_conexiones, obtener_avisos, marcar_avisos_vistos, TIPOS_AVISO_INFORMATIVO)
 from estilo_web import acceso, eur, pagina
 
 bp_panel = Blueprint("panel", __name__)
@@ -205,13 +206,28 @@ PLANTILLA_PANEL = pagina("Panel", """
 """, activa="panel", extra_head=CSS_PANEL + '<meta http-equiv="refresh" content="30">')
 
 
+def _ip_cliente():
+    return (request.headers.get("X-Forwarded-For", "") or request.remote_addr or "").split(",")[0].strip()
+
+
 @bp_panel.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        tenant_id = verificar_login(request.form["email"], request.form["password"])
+        email = request.form.get("email", "").strip().lower()
+        clave_cuenta, clave_ip = f"cuenta:{email}", f"ip:{_ip_cliente()}"
+        espera = max(login_bloqueado(clave_cuenta), login_bloqueado(clave_ip))
+        if espera:
+            minutos = max(1, -(-espera // 60))
+            return render_template_string(PLANTILLA_LOGIN, error=f"Demasiados intentos. Espere {minutos} minutos y vuelva a probar.")
+        tenant_id = verificar_login(email, request.form.get("password", ""))
         if tenant_id:
+            limpiar_fallos_login(clave_cuenta)
+            session.clear()  # sesión nueva al entrar
             session["tenant_id"] = tenant_id
+            session.permanent = True
             return redirect(url_for("panel.panel"))
+        registrar_fallo_login(clave_cuenta, maximo=8)
+        registrar_fallo_login(clave_ip, maximo=40)
         return render_template_string(PLANTILLA_LOGIN, error="Email o contraseña incorrectos")
     return render_template_string(PLANTILLA_LOGIN, error=None)
 

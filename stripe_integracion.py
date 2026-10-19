@@ -33,6 +33,12 @@ def _configurar():
     stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
 
 
+def cancelar_suscripcion(subscription_id):
+    """Cancela la suscripción en Stripe (al eliminar la cuenta, para no seguir cobrando)."""
+    _configurar()
+    stripe.Subscription.cancel(subscription_id)
+
+
 def crear_sesion_pago(tenant_id, email_gestoria, url_exito, url_cancelacion):
     """
     Genera el enlace al que mandas a la gestoría para que pague.

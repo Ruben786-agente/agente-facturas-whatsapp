@@ -22,7 +22,8 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("servidor_principal")
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "cambia-esto-en-produccion")
+import seguridad
+seguridad.iniciar(app)
 
 app.register_blueprint(bp_whatsapp)
 app.register_blueprint(bp_panel)

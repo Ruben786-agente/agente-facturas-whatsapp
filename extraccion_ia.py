@@ -141,7 +141,7 @@ def _leer(contenido: bytes) -> dict:
         try:
             datos = _extraer_json(texto)
         except json.JSONDecodeError:
-            log.warning("Respuesta de la IA no válida (empieza por): %r", texto[:300])
+            log.warning("Respuesta de la IA no válida (%d caracteres)", len(texto))
             raise
 
         if datos.get("es_documento_fiscal") is False:
