@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     create_engine, Column, String, Boolean, DateTime, Numeric, Date, LargeBinary, ForeignKey,
-    BigInteger, UniqueConstraint, Text, Integer, func
+    BigInteger, UniqueConstraint, Text, Integer, func, text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 import uuid
@@ -184,6 +184,22 @@ _engine = None
 _Session = None
 
 
+def _cerrar_api_publica(motor):
+    """
+    Supabase ofrece además una API pública sobre las tablas. Activar la seguridad por filas (RLS) sin reglas la deja
+    cerrada para cualquiera que no sea esta aplicación (que entra con el usuario propietario y no se ve afectada).
+    Es idempotente y se aplica también a las tablas nuevas que se creen en el futuro.
+    """
+    if motor.dialect.name != "postgresql":
+        return
+    try:
+        with motor.begin() as conexion:
+            for tabla in Base.metadata.sorted_tables:
+                conexion.execute(text(f'ALTER TABLE "{tabla.name}" ENABLE ROW LEVEL SECURITY'))
+    except Exception:
+        log.exception("No se pudo activar la seguridad por filas en las tablas")
+
+
 def _obtener_session():
     global _engine, _Session
     if _Session is None:
@@ -192,6 +208,7 @@ def _obtener_session():
         url = os.environ.get("DATABASE_URL", "sqlite:///local_prueba.db")
         motor = create_engine(url, pool_pre_ping=True, hide_parameters=True)
         Base.metadata.create_all(motor)
+        _cerrar_api_publica(motor)
         _engine = motor
         _Session = sessionmaker(bind=motor)
     return _Session()
