@@ -10,7 +10,7 @@ import logging
 import os
 import re
 import secrets
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 import requests
 from flask import Blueprint, redirect, render_template_string, request, session, url_for
@@ -130,9 +130,20 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
     </section>
   </div>
 
+  {% if not e.almacenamiento or not e.correo %}
+  <p class="tenue" style="margin-top:22px;max-width:640px;">¿Su Microsoft 365 le pide permiso de un administrador? Envíele este enlace; con un solo clic aprueba el acceso para toda su organización y después usted ya puede conectar: <br><strong style="word-break:break-all;">{{ url_for('alta.permiso_administrador', _external=True, _scheme='https') }}</strong></p>
+  {% endif %}
+
   <p style="margin-top:28px;"><a class="btn" href="{{ url_for('panel.panel') }}">Ir al panel</a></p>
 </main>
 """, activa="conexiones", extra_head=CSS_CONEXIONES)
+
+PLANTILLA_ADMIN = pagina("Permiso de administrador", """
+<main class="pagina estrecha" style="max-width:640px;padding-top:56px;">
+  <h1 style="font-size:34px;">{{ titulo }}</h1>
+  <p>{{ texto }}</p>
+</main>
+""", barra=False)
 
 
 def _ruta_callback_microsoft():
@@ -171,6 +182,14 @@ def conexiones():
                                   mensaje=request.args.get("ok"), error=request.args.get("error"))
 
 
+@bp_alta.route("/permiso-administrador")
+def permiso_administrador():
+    """Enlace para el administrador de un Microsoft 365: aprueba el acceso de la aplicación para toda su organización."""
+    destino = "https://login.microsoftonline.com/organizations/adminconsent?" + urlencode({
+        "client_id": os.environ["AZURE_CLIENT_ID"], "redirect_uri": os.environ["AZURE_REDIRECT_URI"]})
+    return redirect(destino)
+
+
 @bp_alta.route("/onboarding/onedrive")
 @login_requerido
 def conectar_onedrive():
@@ -190,10 +209,22 @@ def conectar_outlook():
 
 
 def callback_onedrive():
+    # Vuelta del administrador tras aprobar (o rechazar) el permiso: no trae sesión de ninguna gestoría.
+    if request.args.get("admin_consent"):
+        if request.args["admin_consent"].lower() == "true":
+            return render_template_string(PLANTILLA_ADMIN, titulo="Permiso concedido",
+                                          texto="Gracias. Ya puede cerrar esta ventana: su gestoría puede conectar ahora su Microsoft 365.")
+        return render_template_string(PLANTILLA_ADMIN, titulo="No se ha concedido el permiso",
+                                      texto="No se ha podido aprobar el acceso. Si cree que es un error, vuelva a abrir el enlace que le enviaron.")
     if "tenant_id" not in session:
         return redirect(url_for("panel.login"))
     proposito = session.get("ms_proposito", "onedrive")
     nombre = "Outlook" if proposito == "outlook" else "OneDrive"
+    if request.args.get("error"):
+        detalle = ((request.args.get("error") or "") + " " + (request.args.get("error_description") or "")).lower()
+        if any(p in detalle for p in ("admin", "consent_required", "access_denied", "aadsts65001", "aadsts90094", "aadsts900941")):
+            return redirect(url_for("alta.conexiones", error=f"Su Microsoft 365 necesita que un administrador apruebe el permiso para conectar {nombre}. "
+                                                              "Envíele el enlace que aparece al final de esta página y vuelva a intentarlo después."))
     if request.args.get("error") or request.args.get("state") != session.get("state_ms"):
         return redirect(url_for("alta.conexiones", error=f"No se pudo conectar {nombre}. Inténtelo de nuevo."))
     try:
