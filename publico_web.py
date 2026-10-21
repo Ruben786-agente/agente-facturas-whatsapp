@@ -8,6 +8,8 @@ Los datos del titular se leen de variables de entorno, así no hay que tocar el 
     TITULAR_NIF         NIF / CIF
     TITULAR_DOMICILIO   domicilio completo
     CONTACTO_EMAIL      correo de contacto (también para ejercer derechos de protección de datos)
+    PRECIO_PROMO        (opcional) precio de lanzamiento, por ejemplo "29 €"
+    PROMO_NOTA          (opcional) condición de la promoción, por ejemplo "Para las primeras 20 gestorías"
     PRECIO_MENSUAL      por ejemplo  "39 €"   (se muestra como "39 € al mes + IVA")
     JURISDICCION        ciudad cuyos tribunales serán competentes
     URL_PUBLICA         https://agentefacturas.es
@@ -34,6 +36,8 @@ def _datos():
         "nombre": v("TITULAR_NOMBRE"), "nif": v("TITULAR_NIF"), "domicilio": v("TITULAR_DOMICILIO"),
         "email": v("CONTACTO_EMAIL"), "jurisdiccion": v("JURISDICCION"),
         "precio": f"{precio} al mes + IVA" if precio else "",
+        "promo": (os.environ.get("PRECIO_PROMO", "").strip() + " al mes + IVA") if os.environ.get("PRECIO_PROMO", "").strip() else "",
+        "promo_nota": os.environ.get("PROMO_NOTA", "").strip(),
         "url": os.environ.get("URL_PUBLICA", "https://agentefacturas.es").rstrip("/"),
         "anio": date.today().year, "version": VERSION_LEGAL,
     }
@@ -81,6 +85,8 @@ CSS_PUBLICO = """
   .datos-caja ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; color: var(--tinta); }
   .precio-caja { background: var(--superficie); border: 1px solid var(--linea); border-radius: 12px; padding: 32px; margin-top: 28px; max-width: 520px; }
   .precio-caja .cifra-p { font: 600 44px/1.1 var(--serif); color: var(--marca); }
+  .etiqueta-promo { display: inline-block; background: var(--marca-clara); color: var(--marca); font-weight: 600; font-size: 13px; padding: 4px 10px; border-radius: 99px; margin-bottom: 10px; }
+  .precio-habitual { color: var(--tinta-3); font-size: 14px; margin-top: 6px; }
   .precio-caja ul { padding-left: 20px; margin: 16px 0 24px; color: var(--tinta-2); display: grid; gap: 6px; }
   .faq details { border-bottom: 1px solid var(--linea); padding: 16px 0; }
   .faq summary { cursor: pointer; font-weight: 600; font-size: 17px; }
@@ -190,7 +196,11 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
 <section class="p-sec">
   <h2>Un solo plan, todo incluido</h2>
   <div class="precio-caja">
-    {% if d.precio %}<div class="cifra-p">{{ d.precio }}</div>{% else %}<div class="cifra-p">14 días gratis</div>{% endif %}
+    {% if d.promo %}<div class="etiqueta-promo">Precio de lanzamiento</div>
+    <div class="cifra-p">{{ d.promo }}</div>
+    {% if d.precio %}<div class="precio-habitual">Precio habitual: <s>{{ d.precio }}</s></div>{% endif %}
+    {% if d.promo_nota %}<div class="precio-habitual">{{ d.promo_nota }}</div>{% endif %}
+    {% elif d.precio %}<div class="cifra-p">{{ d.precio }}</div>{% else %}<div class="cifra-p">14 días gratis</div>{% endif %}
     <ul>
       <li>Prueba gratuita de 14 días, sin tarjeta</li>
       <li>Todas las funciones incluidas</li>
@@ -243,7 +253,7 @@ PLANTILLA_TERMINOS = _legal("Condiciones del servicio", """
 <ul>
   <li>El Servicio se contrata a través de la web. El Cliente declara ser una gestoría o profesional que actúa en el ámbito de su actividad.</li>
   <li>Se ofrece una prueba gratuita de 14 días, sin tarjeta. Al terminar, para seguir usándolo hay que suscribirse.</li>
-  <li>Precio: {% if d.precio %}{{ d.precio }}{% else %}[PENDIENTE]{% endif %}. Se cobra por periodos mensuales mediante la pasarela de pago Stripe y se renueva automáticamente cada mes.</li>
+  <li>Precio: {% if d.promo %}{{ d.promo }} (precio de lanzamiento; precio habitual: {{ d.precio }}){% elif d.precio %}{{ d.precio }}{% else %}[PENDIENTE]{% endif %}. Se cobra por periodos mensuales mediante la pasarela de pago Stripe y se renueva automáticamente cada mes.</li>
   <li>El Cliente puede cancelar en cualquier momento; la cancelación surte efecto al final del periodo ya pagado. No hay permanencia y no se reembolsan periodos ya iniciados, salvo error imputable al Prestador.</li>
 </ul>
 
