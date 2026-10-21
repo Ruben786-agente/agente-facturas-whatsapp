@@ -70,6 +70,10 @@ PLANTILLA_REGISTRO = acceso("Crear cuenta", """
         campo.addEventListener("input", revisar);
       })();
     </script>
+    <label style="display:flex;gap:10px;align-items:flex-start;margin-top:18px;font-weight:400;font-size:14px;">
+      <input type="checkbox" name="acepto" value="1" required style="width:auto;margin-top:3px;">
+      <span>He leído y acepto las <a href="/terminos" target="_blank">condiciones del servicio</a>, la <a href="/privacidad" target="_blank">política de privacidad</a> y el <a href="/encargo" target="_blank">contrato de encargo del tratamiento</a>.</span>
+    </label>
     {% if error %}<p class="error-texto" role="alert">{{ error }}</p>{% endif %}
     <button class="btn principal grande" type="submit">Crear cuenta</button>
   </form>
@@ -201,6 +205,8 @@ def registro():
         error = None
         if not nombre or not _EMAIL.match(email):
             error = "Revise el nombre y el email."
+        elif not request.form.get("acepto"):
+            error = "Para crear la cuenta debe aceptar las condiciones del servicio y la política de privacidad."
         elif contrasena_debil(password, email):
             error = contrasena_debil(password, email)
         elif existe_email_gestoria(email):

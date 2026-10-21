@@ -17,6 +17,7 @@ from panel_web import bp_panel
 from alta_web import bp_alta
 from tareas_web import bp_tareas
 from revision_web import bp_revision
+from publico_web import bp_publico
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("servidor_principal")
@@ -30,6 +31,7 @@ app.register_blueprint(bp_panel)
 app.register_blueprint(bp_alta)
 app.register_blueprint(bp_tareas)
 app.register_blueprint(bp_revision)
+app.register_blueprint(bp_publico)
 
 
 @app.route("/webhook/stripe", methods=["POST"])
@@ -60,11 +62,6 @@ def stripe_webhook():
             log.info("Suscripción desactivada para tenant %s (%s)", tenant_id, tipo)
 
     return "OK", 200
-
-
-@app.route("/")
-def home():
-    return "Servidor funcionando correctamente."
 
 
 if __name__ == "__main__":
