@@ -123,6 +123,11 @@ def _llamar_api(bloque):
             bloque, {"type": "text", "text": "Extrae los datos de este documento según las instrucciones."},
         ]}],
     )
+    try:  # contar el consumo no puede romper nunca la lectura
+        from basededatos import registrar_uso_ia
+        registrar_uso_ia(respuesta.usage.input_tokens, respuesta.usage.output_tokens)
+    except Exception:
+        log.debug("No se pudo registrar el consumo de la IA")
     return "".join(b.text for b in respuesta.content if b.type == "text"), respuesta.stop_reason
 
 

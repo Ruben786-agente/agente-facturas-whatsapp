@@ -19,7 +19,7 @@ Mientras falte alguno, el texto muestra [PENDIENTE] para que no se publique por 
 import os
 from datetime import date
 
-from flask import Blueprint, Response, render_template_string, session, url_for
+from flask import Blueprint, Response, abort, render_template_string, session, url_for
 
 from estilo_web import LOGO, pagina
 
@@ -402,3 +402,42 @@ def sitemap():
     cuerpo = "".join(f"<url><loc>{base}{r}</loc></url>" for r in rutas)
     return Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                     + cuerpo + "</urlset>", mimetype="application/xml")
+
+
+# ---------------------------------------------------------------------------
+# Consumo de la IA (solo para el titular: el email debe coincidir con ADMIN_EMAIL)
+# ---------------------------------------------------------------------------
+
+@bp_publico.route("/admin/uso-ia")
+def uso_ia():
+    from basededatos import email_de_gestoria, obtener_uso_ia
+    admin = os.environ.get("ADMIN_EMAIL", "").strip().lower()
+    tenant = session.get("tenant_id")
+    if not admin or not tenant or (email_de_gestoria(tenant) or "").lower() != admin:
+        abort(404)
+    filas = obtener_uso_ia(60)
+    def _num(nombre):
+        try:
+            return float(os.environ.get(nombre, "").replace(",", "."))
+        except ValueError:
+            return None
+    pe, ps = _num("PRECIO_ENTRADA_USD_MTOK"), _num("PRECIO_SALIDA_USD_MTOK")
+    for f in filas:
+        f["usd"] = (f["entrada"] * pe + f["salida"] * ps) / 1e6 if pe is not None and ps is not None else None
+        f["usd_llamada"] = f["usd"] / f["llamadas"] if f["usd"] is not None and f["llamadas"] else None
+    tot = {k: sum(f[k] for f in filas) for k in ("llamadas", "entrada", "salida")}
+    tot["usd"] = sum(f["usd"] for f in filas) if pe is not None and ps is not None else None
+    plantilla = pagina("Consumo de la IA", """
+<main class="pagina" style="padding-top:40px;max-width:860px;">
+  <h1 style="font-size:32px;">Consumo de la IA</h1>
+  <p class="tenue">Cada llamada lee un documento (una relectura cuenta como otra llamada). Últimos 60 días con actividad.</p>
+  <table style="width:100%;border-collapse:collapse;margin-top:18px;">
+    <tr><th align="left">Día</th><th align="right">Llamadas</th><th align="right">Tokens entrada</th><th align="right">Tokens salida</th><th align="right">Coste (USD)</th><th align="right">USD / llamada</th></tr>
+    {% for f in filas %}<tr><td>{{ f.dia }}</td><td align="right">{{ f.llamadas }}</td><td align="right">{{ f.entrada }}</td><td align="right">{{ f.salida }}</td>
+      <td align="right">{{ "%.2f"|format(f.usd) if f.usd is not none else "-" }}</td><td align="right">{{ "%.4f"|format(f.usd_llamada) if f.usd_llamada is not none else "-" }}</td></tr>{% endfor %}
+    <tr style="font-weight:600;border-top:1px solid var(--linea);"><td>Total</td><td align="right">{{ tot.llamadas }}</td><td align="right">{{ tot.entrada }}</td><td align="right">{{ tot.salida }}</td>
+      <td align="right">{{ "%.2f"|format(tot.usd) if tot.usd is not none else "-" }}</td><td align="right">{{ "%.4f"|format(tot.usd / tot.llamadas) if tot.usd is not none and tot.llamadas else "-" }}</td></tr>
+  </table>
+  {% if pe is none %}<p class="tenue" style="margin-top:16px;">Para ver el coste en dólares, defina en Render PRECIO_ENTRADA_USD_MTOK y PRECIO_SALIDA_USD_MTOK (dólares por millón de tokens).</p>{% endif %}
+</main>""")
+    return render_template_string(plantilla, filas=filas, tot=tot, pe=pe)

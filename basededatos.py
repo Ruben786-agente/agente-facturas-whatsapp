@@ -180,6 +180,15 @@ class IntentoLogin(Base):
     bloqueado_hasta = Column(DateTime(timezone=True))
 
 
+class UsoIA(Base):
+    """Consumo de la IA por día (solo cifras, sin datos de nadie): sirve para calcular el coste real por factura."""
+    __tablename__ = "uso_ia"
+    dia = Column(String, primary_key=True)  # AAAA-MM-DD
+    llamadas = Column(Integer, nullable=False, default=0)
+    tokens_entrada = Column(Integer, nullable=False, default=0)
+    tokens_salida = Column(Integer, nullable=False, default=0)
+
+
 _engine = None
 _Session = None
 
@@ -1159,5 +1168,35 @@ def registrar_sin_identificar(tenant_id, nombre_archivo, motivo):
     try:
         session.add(DocumentoSinIdentificar(tenant_id=tenant_id, nombre_archivo=nombre_archivo, motivo=motivo))
         session.commit()
+    finally:
+        session.close()
+
+
+def registrar_uso_ia(tokens_entrada, tokens_salida):
+    """Suma una llamada a la IA al contador del día. Nunca debe romper la lectura de una factura."""
+    dia = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for _ in range(2):
+        session = _obtener_session()
+        try:
+            r = session.get(UsoIA, dia)
+            if r is None:
+                r = UsoIA(dia=dia, llamadas=0, tokens_entrada=0, tokens_salida=0)
+                session.add(r)
+            r.llamadas = (r.llamadas or 0) + 1
+            r.tokens_entrada = (r.tokens_entrada or 0) + int(tokens_entrada or 0)
+            r.tokens_salida = (r.tokens_salida or 0) + int(tokens_salida or 0)
+            session.commit()
+            return
+        except Exception:
+            session.rollback()
+        finally:
+            session.close()
+
+
+def obtener_uso_ia(dias=30):
+    session = _obtener_session()
+    try:
+        filas = session.query(UsoIA).order_by(UsoIA.dia.desc()).limit(dias).all()
+        return [{"dia": f.dia, "llamadas": f.llamadas, "entrada": f.tokens_entrada, "salida": f.tokens_salida} for f in filas]
     finally:
         session.close()
