@@ -29,6 +29,11 @@ def _ejecutar_ciclo():
         ciclo_correo()
     except Exception:
         log.exception("Fallo en el ciclo de correo")
+    try:  # archivos que la gestoría sube a mano a su carpeta «Entrada»
+        from sondeo_entrada import ciclo_entrada
+        ciclo_entrada()
+    except Exception:
+        log.exception("Fallo en el ciclo de la carpeta de entrada")
     finally:
         with _candado:
             _en_marcha = False

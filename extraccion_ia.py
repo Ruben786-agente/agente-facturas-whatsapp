@@ -21,6 +21,11 @@ import anthropic
 log = logging.getLogger("extraccion_ia")
 
 MODELO = os.environ.get("MODELO_EXTRACCION", "claude-sonnet-5-5")
+# Modelo barato para la primera lectura (opcional). Si está definido, sus lecturas dudosas se repiten con MODELO.
+MODELO_RAPIDO = os.environ.get("MODELO_EXTRACCION_RAPIDA", "").strip()
+# Con COMPARAR_MODELOS=1 (y MODELO_RAPIDO definido) se sigue usando MODELO para decidir, y además el barato lee lo mismo
+# solo para anotar cuántas veces coincide (contadores, sin datos de nadie). Sirve para decidir con datos si activarlo.
+COMPARAR_MODELOS = os.environ.get("COMPARAR_MODELOS", "") == "1"
 
 PROMPT = """Eres un extractor de datos de facturas y tickets españoles para uso contable.
 Analiza el documento adjunto (imagen o PDF) y devuelve ÚNICAMENTE un JSON válido con
@@ -114,24 +119,25 @@ def _respuesta_por_defecto(motivo: str) -> dict:
     }
 
 
-def _llamar_api(bloque):
+def _llamar_api(bloque, modelo=None):
     """Una llamada a la IA. Devuelve (texto, stop_reason)."""
+    modelo = modelo or MODELO
     cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     respuesta = cliente.messages.create(
-        model=MODELO, max_tokens=4000, system=PROMPT,
+        model=modelo, max_tokens=4000, system=PROMPT,
         messages=[{"role": "user", "content": [
             bloque, {"type": "text", "text": "Extrae los datos de este documento según las instrucciones."},
         ]}],
     )
     try:  # contar el consumo no puede romper nunca la lectura
         from basededatos import registrar_uso_ia
-        registrar_uso_ia(respuesta.usage.input_tokens, respuesta.usage.output_tokens)
+        registrar_uso_ia(respuesta.usage.input_tokens, respuesta.usage.output_tokens, modelo)
     except Exception:
         log.debug("No se pudo registrar el consumo de la IA")
     return "".join(b.text for b in respuesta.content if b.type == "text"), respuesta.stop_reason
 
 
-def _leer(contenido: bytes) -> dict:
+def _leer(contenido: bytes, modelo=None) -> dict:
     media_type = _detectar_media_type(contenido)
     datos_b64 = base64.b64encode(contenido).decode()
     if media_type == "application/pdf":
@@ -140,7 +146,7 @@ def _leer(contenido: bytes) -> dict:
         bloque = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": datos_b64}}
 
     try:
-        texto, motivo_parada = _llamar_api(bloque)
+        texto, motivo_parada = _llamar_api(bloque, modelo)
         if motivo_parada == "max_tokens":
             log.warning("La respuesta de la IA se cortó por longitud")
         try:
@@ -189,9 +195,33 @@ def _coinciden(a: dict, b: dict) -> bool:
         return False
 
 
-def extraer_factura(contenido: bytes) -> dict:
+def _cuadra(datos: dict) -> bool:
+    """Bases + cuotas (+ recargo - retención) suman el total impreso. Sin desglose no se puede comprobar: False."""
+    try:
+        desgloses = datos.get("desgloses") or []
+        if not desgloses:
+            return False
+        suma = sum(float(d.get("base") or 0) + float(d.get("cuota_iva") or 0) + float(d.get("cuota_recargo") or 0)
+                   - float(d.get("cuota_retencion") or 0) for d in desgloses)
+        return abs(suma - float(datos.get("total_factura") or 0)) <= 0.05
+    except (TypeError, ValueError):
+        return False
+
+
+def _fiable(datos: dict) -> bool:
+    """Una lectura del modelo barato se acepta solo si es clara y cuadra; si no, se repite con el modelo principal."""
+    if datos.get("_lectura_fallida") or datos.get("es_documento_fiscal") is False:
+        return False  # que algo «no sea una factura» lo confirma siempre el modelo principal
+    if datos.get("confianza") != "alta":
+        return False
+    if datos.get("es_factura_simplificada") or datos.get("formato_ticket_tpv"):
+        return float(datos.get("total_factura") or 0) > 0   # los tickets suelen no traer desglose
+    return _cuadra(datos)
+
+
+def _extraer_con_modelo_principal(contenido: bytes) -> dict:
     """
-    Lee el documento con la IA. Si sale con confianza 'baja' se lee una segunda vez; si la segunda ya no sale 'baja' y coincide con la
+    Lee el documento con MODELO. Si sale con confianza 'baja' se lee una segunda vez; si la segunda ya no sale 'baja' y coincide con la
     primera en número, fecha, total y CIF, se acepta (dos lecturas independientes que dicen lo
     mismo). Si no, se queda como estaba: 'baja' y a Revisión.
     """
@@ -211,6 +241,29 @@ def extraer_factura(contenido: bytes) -> dict:
         return {**segunda, "confianza": "media", "relectura": "confirmada"}
     log.info("Segunda lectura: no coincide con la primera, va a Revisión")
     return primera
+
+
+def extraer_factura(contenido: bytes) -> dict:
+    """
+    Con MODELO_EXTRACCION_RAPIDA definido (y sin COMPARAR_MODELOS): primera lectura con el modelo barato; si es clara y cuadra
+    se acepta, y si no, se lee con el modelo principal como siempre. Sin esa variable, siempre el modelo principal.
+    """
+    if MODELO_RAPIDO and not COMPARAR_MODELOS:
+        rapida = _leer(contenido, MODELO_RAPIDO)
+        if _fiable(rapida):
+            return rapida
+        log.info("Lectura rápida dudosa: se repite con el modelo principal")
+        return _extraer_con_modelo_principal(contenido)
+
+    resultado = _extraer_con_modelo_principal(contenido)
+    if MODELO_RAPIDO and COMPARAR_MODELOS and resultado.get("es_documento_fiscal") is not False and not resultado.get("_lectura_fallida"):
+        try:  # solo para medir: el resultado que se usa es el del modelo principal
+            from basededatos import registrar_comparacion
+            rapida = _leer(contenido, MODELO_RAPIDO)
+            registrar_comparacion(_fiable(rapida) and _coinciden(resultado, rapida))
+        except Exception:
+            log.debug("No se pudo anotar la comparación de modelos")
+    return resultado
 
 
 def factura_a_ticket_ligero(factura: dict) -> dict:

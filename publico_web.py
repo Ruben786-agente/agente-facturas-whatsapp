@@ -408,36 +408,68 @@ def sitemap():
 # Consumo de la IA (solo para el titular: el email debe coincidir con ADMIN_EMAIL)
 # ---------------------------------------------------------------------------
 
+# Precios en dólares por millón de tokens (entrada, salida), según las tarifas públicas consultadas en octubre de 2026.
+# Se pueden cambiar sin tocar el código con la variable PRECIOS_IA, por ejemplo: {"claude-haiku-5-5": [0.10, 0.50]}
+PRECIOS_IA = {"claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-5-5": (0.10, 0.50)}
+
+
+def _precios_ia():
+    precios = dict(PRECIOS_IA)
+    try:
+        import json
+        for modelo, (entrada, salida) in json.loads(os.environ.get("PRECIOS_IA", "{}") or "{}").items():
+            precios[modelo] = (float(entrada), float(salida))
+    except (ValueError, TypeError):
+        pass
+    return precios
+
+
 @bp_publico.route("/admin/uso-ia")
 def uso_ia():
-    from basededatos import email_de_gestoria, obtener_uso_ia
+    from basededatos import email_de_gestoria, obtener_comparacion, obtener_uso_ia
     admin = os.environ.get("ADMIN_EMAIL", "").strip().lower()
     tenant = session.get("tenant_id")
     if not admin or not tenant or (email_de_gestoria(tenant) or "").lower() != admin:
         abort(404)
+    precios = _precios_ia()
     filas = obtener_uso_ia(60)
-    def _num(nombre):
-        try:
-            return float(os.environ.get(nombre, "").replace(",", "."))
-        except ValueError:
-            return None
-    pe, ps = _num("PRECIO_ENTRADA_USD_MTOK"), _num("PRECIO_SALIDA_USD_MTOK")
+    por_modelo = {}
     for f in filas:
-        f["usd"] = (f["entrada"] * pe + f["salida"] * ps) / 1e6 if pe is not None and ps is not None else None
+        p = precios.get(f["modelo"])
+        f["usd"] = (f["entrada"] * p[0] + f["salida"] * p[1]) / 1e6 if p else None
         f["usd_llamada"] = f["usd"] / f["llamadas"] if f["usd"] is not None and f["llamadas"] else None
-    tot = {k: sum(f[k] for f in filas) for k in ("llamadas", "entrada", "salida")}
-    tot["usd"] = sum(f["usd"] for f in filas) if pe is not None and ps is not None else None
+        m = por_modelo.setdefault(f["modelo"], {"modelo": f["modelo"], "llamadas": 0, "entrada": 0, "salida": 0, "usd": 0.0, "conocido": p is not None})
+        m["llamadas"] += f["llamadas"]; m["entrada"] += f["entrada"]; m["salida"] += f["salida"]
+        m["usd"] += f["usd"] or 0.0
+    resumen = sorted(por_modelo.values(), key=lambda m: m["usd"], reverse=True)
+    total_usd = sum(m["usd"] for m in resumen)
+    total_llamadas = sum(m["llamadas"] for m in resumen)
+    comparadas, coinciden = obtener_comparacion()
     plantilla = pagina("Consumo de la IA", """
-<main class="pagina" style="padding-top:40px;max-width:860px;">
+<main class="pagina" style="padding-top:40px;max-width:980px;">
   <h1 style="font-size:32px;">Consumo de la IA</h1>
-  <p class="tenue">Cada llamada lee un documento (una relectura cuenta como otra llamada). Últimos 60 días con actividad.</p>
-  <table style="width:100%;border-collapse:collapse;margin-top:18px;">
-    <tr><th align="left">Día</th><th align="right">Llamadas</th><th align="right">Tokens entrada</th><th align="right">Tokens salida</th><th align="right">Coste (USD)</th><th align="right">USD / llamada</th></tr>
-    {% for f in filas %}<tr><td>{{ f.dia }}</td><td align="right">{{ f.llamadas }}</td><td align="right">{{ f.entrada }}</td><td align="right">{{ f.salida }}</td>
-      <td align="right">{{ "%.2f"|format(f.usd) if f.usd is not none else "-" }}</td><td align="right">{{ "%.4f"|format(f.usd_llamada) if f.usd_llamada is not none else "-" }}</td></tr>{% endfor %}
-    <tr style="font-weight:600;border-top:1px solid var(--linea);"><td>Total</td><td align="right">{{ tot.llamadas }}</td><td align="right">{{ tot.entrada }}</td><td align="right">{{ tot.salida }}</td>
-      <td align="right">{{ "%.2f"|format(tot.usd) if tot.usd is not none else "-" }}</td><td align="right">{{ "%.4f"|format(tot.usd / tot.llamadas) if tot.usd is not none and tot.llamadas else "-" }}</td></tr>
+  <p class="tenue">Cada llamada lee un documento o divide un PDF (una relectura cuenta como otra llamada). Últimos 60 días con actividad.</p>
+
+  <h2 style="font-size:20px;margin-top:26px;">Total por modelo</h2>
+  <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+    <tr><th align="left">Modelo</th><th align="right">Llamadas</th><th align="right">Tokens entrada</th><th align="right">Tokens salida</th><th align="right">Coste (USD)</th><th align="right">USD / llamada</th></tr>
+    {% for m in resumen %}<tr><td>{{ m.modelo }}</td><td align="right">{{ m.llamadas }}</td><td align="right">{{ m.entrada }}</td><td align="right">{{ m.salida }}</td>
+      <td align="right">{{ "%.2f"|format(m.usd) if m.conocido else "sin precio" }}</td><td align="right">{{ "%.4f"|format(m.usd / m.llamadas) if m.conocido and m.llamadas else "-" }}</td></tr>{% endfor %}
+    <tr style="font-weight:600;border-top:1px solid var(--linea);"><td>Total</td><td align="right">{{ total_llamadas }}</td><td></td><td></td><td align="right">{{ "%.2f"|format(total_usd) }}</td><td align="right">{{ "%.4f"|format(total_usd / total_llamadas) if total_llamadas else "-" }}</td></tr>
   </table>
-  {% if pe is none %}<p class="tenue" style="margin-top:16px;">Para ver el coste en dólares, defina en Render PRECIO_ENTRADA_USD_MTOK y PRECIO_SALIDA_USD_MTOK (dólares por millón de tokens).</p>{% endif %}
+
+  {% if comparadas %}
+  <h2 style="font-size:20px;margin-top:26px;">Modelo barato frente al principal</h2>
+  <p>Ha leído lo mismo (número, fecha, total y los dos CIF, y con lectura clara que cuadra) en <strong>{{ coinciden }} de {{ comparadas }}</strong> documentos ({{ "%.0f"|format(100 * coinciden / comparadas) }} %).</p>
+  {% endif %}
+
+  <h2 style="font-size:20px;margin-top:26px;">Por día</h2>
+  <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+    <tr><th align="left">Día</th><th align="left">Modelo</th><th align="right">Llamadas</th><th align="right">Tokens entrada</th><th align="right">Tokens salida</th><th align="right">Coste (USD)</th></tr>
+    {% for f in filas %}<tr><td>{{ f.dia }}</td><td>{{ f.modelo }}</td><td align="right">{{ f.llamadas }}</td><td align="right">{{ f.entrada }}</td><td align="right">{{ f.salida }}</td>
+      <td align="right">{{ "%.2f"|format(f.usd) if f.usd is not none else "-" }}</td></tr>{% endfor %}
+  </table>
+  <p class="tenue" style="margin-top:16px;">Precios usados (USD por millón de tokens, entrada / salida): {% for k, v in precios.items() %}{{ k }}: {{ v[0] }} / {{ v[1] }}{% if not loop.last %}; {% endif %}{% endfor %}. Confírmelos en la consola de Anthropic.</p>
 </main>""")
-    return render_template_string(plantilla, filas=filas, tot=tot, pe=pe)
+    return render_template_string(plantilla, filas=filas, resumen=resumen, total_usd=total_usd, total_llamadas=total_llamadas,
+                                  comparadas=comparadas, coinciden=coinciden, precios=precios)

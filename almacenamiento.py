@@ -39,6 +39,11 @@ class AlmacenamientoDocumentos(ABC):
         """Dirección web para abrir un archivo o carpeta en el navegador."""
         raise NotImplementedError
 
+    def listar_contenido(self, carpeta_id):
+        """Todo lo que hay directamente en una carpeta, sin filtrar por fecha: (archivos, subcarpetas).
+        archivos es una lista de ArchivoRemoto; subcarpetas, una lista de (id, nombre). Recorre todas las páginas."""
+        raise NotImplementedError
+
 
 class OneDriveStorage(AlmacenamientoDocumentos):
     GRAPH_BASE = "https://graph.microsoft.com/v1.0"
@@ -67,6 +72,23 @@ class OneDriveStorage(AlmacenamientoDocumentos):
             archivos.append(ArchivoRemoto(id=item["id"], nombre=item["name"], carpeta_id=carpeta_id,
                                            tamano_bytes=item["size"], fecha_modificacion=item["lastModifiedDateTime"]))
         return archivos
+
+    def listar_contenido(self, carpeta_id):
+        url = f"{self._drive_prefix()}/items/{carpeta_id}/children?$top=200"
+        archivos, carpetas = [], []
+        while url:
+            resp = requests.get(url, headers=self._headers())
+            resp.raise_for_status()
+            datos = resp.json()
+            for item in datos.get("value", []):
+                if "folder" in item:
+                    carpetas.append((item["id"], item["name"]))
+                elif "file" in item:
+                    archivos.append(ArchivoRemoto(id=item["id"], nombre=item["name"], carpeta_id=carpeta_id,
+                                                  tamano_bytes=item.get("size", 0),
+                                                  fecha_modificacion=item.get("lastModifiedDateTime", "")))
+            url = datos.get("@odata.nextLink")  # ya trae la dirección completa de la página siguiente
+        return archivos, carpetas
 
     def descargar_archivo(self, archivo_id):
         resp = requests.get(f"{self._drive_prefix()}/items/{archivo_id}/content", headers=self._headers())
@@ -206,6 +228,25 @@ class GoogleDriveStorage(AlmacenamientoDocumentos):
         if desde:
             q += f" and modifiedTime > '{desde}'"
         return [self._archivo(i, carpeta_id) for i in self._listar(q)]
+
+    def listar_contenido(self, carpeta_id):
+        archivos, carpetas, pagina = [], [], None
+        while True:
+            params = {"q": f"'{carpeta_id}' in parents and trashed=false",
+                      "fields": "nextPageToken,files(id,name,size,modifiedTime,mimeType)", "pageSize": 100, "spaces": "drive"}
+            if pagina:
+                params["pageToken"] = pagina
+            resp = self._http.get(f"{self.API}/files", headers=self._headers(), params=params)
+            resp.raise_for_status()
+            datos = resp.json()
+            for item in datos.get("files", []):
+                if item.get("mimeType") == self.TIPO_CARPETA:
+                    carpetas.append((item["id"], item["name"]))
+                else:
+                    archivos.append(self._archivo(item, carpeta_id))
+            pagina = datos.get("nextPageToken")
+            if not pagina:
+                return archivos, carpetas
 
     def descargar_archivo(self, archivo_id):
         resp = self._http.get(f"{self.API}/files/{archivo_id}", headers=self._headers(), params={"alt": "media"})

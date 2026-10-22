@@ -125,6 +125,10 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
           <a class="btn principal" href="{{ url_for('alta.conectar_gdrive') }}">Conectar Google Drive</a>
         {% endif %}
       </div>
+      {% if entrada_activa %}
+      <p class="tenue" style="margin-top:12px;">¿Tiene facturas escaneadas o fotos? Déjelas, sueltas o en carpetas, en <strong>Agente Facturas / Entrada</strong> de su OneDrive y el agente las lee y las archiva solo, igual que las del correo.
+        <a href="{{ url_for('alta.abrir_entrada') }}" target="_blank" rel="noopener">Abrir la carpeta Entrada</a></p>
+      {% endif %}
     </section>
 
     <section class="paso {% if e.correo and not e.correo_error %}hecho{% endif %}">
@@ -224,9 +228,31 @@ def registro():
 @bp_alta.route("/conexiones")
 @login_requerido
 def conexiones():
+    from sondeo_entrada import _proveedores_activos
     estado = obtener_estado_conexiones(session["tenant_id"])
     return render_template_string(PLANTILLA_CONEXIONES, e=estado, gestoria_nombre=estado["nombre"],
+                                  entrada_activa=estado["almacenamiento"] in _proveedores_activos(),
                                   mensaje=request.args.get("ok"), error=request.args.get("error"))
+
+
+@bp_alta.route("/conexiones/entrada")
+@login_requerido
+def abrir_entrada():
+    """Lleva a la gestoría a su carpeta «Entrada» (la crea si aún no existe)."""
+    from almacenamiento_tenant import proveedor_almacenamiento, storage_para_tenant
+    from sondeo_entrada import _proveedores_activos, asegurar_carpetas
+    tenant_id = session["tenant_id"]
+    try:
+        proveedor = proveedor_almacenamiento(tenant_id)
+        if proveedor not in _proveedores_activos():
+            return redirect(url_for("alta.conexiones", error="La carpeta Entrada aún no está disponible con su almacenamiento."))
+        storage = storage_para_tenant(tenant_id)
+        enlace = storage.obtener_enlace(asegurar_carpetas(storage, tenant_id, proveedor)["entrada"])
+        if enlace.startswith("https://"):
+            return redirect(enlace)
+    except Exception:
+        log.exception("No se pudo abrir la carpeta Entrada de %s", tenant_id)
+    return redirect(url_for("alta.conexiones", error="No hemos podido abrir la carpeta Entrada. Inténtelo de nuevo en un momento."))
 
 
 @bp_alta.route("/permiso-administrador")

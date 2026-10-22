@@ -19,6 +19,9 @@ from pypdf import PdfReader, PdfWriter
 
 from extraccion_ia import MODELO, _extraer_json
 
+# Modelo para averiguar dónde empieza y acaba cada factura de un PDF (opcional; por defecto el principal).
+MODELO_DIVISION = os.environ.get("MODELO_DIVISION", "").strip() or MODELO
+
 log = logging.getLogger("dividir_pdf")
 
 MAX_PAGINAS = 100  # límite de la API de Claude para un PDF
@@ -75,13 +78,18 @@ def detectar_documentos(contenido: bytes, total_paginas: int) -> list:
     try:
         cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         respuesta = cliente.messages.create(
-            model=MODELO, max_tokens=2000, system=PROMPT_DIVISION,
+            model=MODELO_DIVISION, max_tokens=2000, system=PROMPT_DIVISION,
             messages=[{"role": "user", "content": [
                 {"type": "document", "source": {"type": "base64", "media_type": "application/pdf",
                                                 "data": base64.b64encode(contenido).decode()}},
                 {"type": "text", "text": f"Este PDF tiene {total_paginas} páginas. Indica cómo se agrupan."},
             ]}],
         )
+        try:  # contar el consumo (la división lee el PDF entero) sin poder romper nada
+            from basededatos import registrar_uso_ia
+            registrar_uso_ia(respuesta.usage.input_tokens, respuesta.usage.output_tokens, MODELO_DIVISION)
+        except Exception:
+            log.debug("No se pudo registrar el consumo de la división")
         texto = "".join(b.text for b in respuesta.content if b.type == "text")
         grupos = _validar_grupos(_extraer_json(texto).get("documentos", []), total_paginas)
         if grupos is None:
