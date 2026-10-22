@@ -26,6 +26,9 @@ MODELO_RAPIDO = os.environ.get("MODELO_EXTRACCION_RAPIDA", "").strip()
 # Con COMPARAR_MODELOS=1 (y MODELO_RAPIDO definido) se sigue usando MODELO para decidir, y además el barato lee lo mismo
 # solo para anotar cuántas veces coincide (contadores, sin datos de nadie). Sirve para decidir con datos si activarlo.
 COMPARAR_MODELOS = os.environ.get("COMPARAR_MODELOS", "") == "1"
+# Con VERIFICACION_DOBLE=1 cada factura se lee dos veces, con modelos distintos si hay MODELO_RAPIDO, y solo se anota en el
+# Excel si las dos lecturas coinciden en número, fecha, total, CIF e importes del desglose. Si no, va a Revisión.
+VERIFICACION_DOBLE = os.environ.get("VERIFICACION_DOBLE", "") == "1"
 
 PROMPT = """Eres un extractor de datos de facturas y tickets españoles para uso contable.
 Analiza el documento adjunto (imagen o PDF) y devuelve ÚNICAMENTE un JSON válido con
@@ -52,10 +55,12 @@ ESTRUCTURA (todos los campos son obligatorios):
 
 REGLAS:
 1. es_documento_fiscal: true si es una factura, factura simplificada, ticket de compra o abono
-   (factura rectificativa). false si es otra cosa: albarán, presupuesto, pedido, contrato,
-   publicidad, firma de correo, foto sin factura, documento ilegible o en blanco. Si dudas
-   entre factura y otra cosa, pon true y baja la confianza. Si es false, el resto de campos
-   puede ir vacío ("" o 0).
+   (factura rectificativa). false SOLO si es claramente otra cosa: albarán, presupuesto, pedido,
+   contrato, publicidad, firma de correo, o una página completamente en blanco. Si dudas entre
+   factura y otra cosa, pon true y baja la confianza. Si el documento parece una factura o un ticket
+   pero está borroso, cortado, torcido o ilegible, NO lo descartes: pon true, confianza "baja" y deja
+   vacío lo que no puedas leer. Que un documento se lea mal nunca es motivo para decir false. Si es
+   false, el resto de campos puede ir vacío ("" o 0).
 2. CIF/NIF: mayúsculas y sin espacios, puntos ni guiones. Si no aparece con claridad, "".
    Nunca inventes un CIF.
 3. num_factura: siempre texto, conservando ceros a la izquierda, guiones y barras.
@@ -208,6 +213,41 @@ def _cuadra(datos: dict) -> bool:
         return False
 
 
+def _diferencias(a: dict, b: dict) -> list:
+    """Campos críticos en los que dos lecturas del mismo documento no coinciden. Vacía si dicen lo mismo."""
+    dif = []
+    try:
+        if (a.get("num_factura") or "").strip().upper() != (b.get("num_factura") or "").strip().upper():
+            dif.append("número de factura")
+        if (a.get("fecha_factura") or "").strip() != (b.get("fecha_factura") or "").strip():
+            dif.append("fecha")
+        if abs(float(a.get("total_factura") or 0) - float(b.get("total_factura") or 0)) > 0.01:
+            dif.append("total")
+        if _cif((a.get("emisor") or {}).get("cif_nif")) != _cif((b.get("emisor") or {}).get("cif_nif")):
+            dif.append("CIF del emisor")
+        if _cif((a.get("destinatario") or {}).get("cif_nif")) != _cif((b.get("destinatario") or {}).get("cif_nif")):
+            dif.append("CIF del comprador")
+
+        def _lineas(x):
+            return sorted((round(float(d.get("base") or 0), 2), float(d.get("pct_iva") or 0), round(float(d.get("cuota_iva") or 0), 2))
+                          for d in (x.get("desgloses") or []))
+        if _lineas(a) != _lineas(b):
+            dif.append("importes del desglose")
+    except (TypeError, ValueError):
+        dif.append("formato de los datos")
+    return dif
+
+
+def _acordar(elegida: dict, verificadora: dict) -> dict:
+    """Doble lectura: si la segunda opinión no existe o discrepa en algo crítico, la factura va a Revisión diciendo en qué."""
+    if verificadora.get("_lectura_fallida") or verificadora.get("es_documento_fiscal") is False:
+        return {**elegida, "confianza": "baja", "_motivo_revision": "la segunda lectura de comprobación no ha podido confirmar el documento"}
+    dif = _diferencias(elegida, verificadora)
+    if dif:
+        return {**elegida, "confianza": "baja", "_motivo_revision": "las dos lecturas no coinciden en: " + ", ".join(dif)}
+    return elegida
+
+
 def _fiable(datos: dict) -> bool:
     """Una lectura del modelo barato se acepta solo si es clara y cuadra; si no, se repite con el modelo principal."""
     if datos.get("_lectura_fallida") or datos.get("es_documento_fiscal") is False:
@@ -216,7 +256,8 @@ def _fiable(datos: dict) -> bool:
         return False
     if datos.get("es_factura_simplificada") or datos.get("formato_ticket_tpv"):
         return float(datos.get("total_factura") or 0) > 0   # los tickets suelen no traer desglose
-    return _cuadra(datos)
+    from validaciones import problemas_factura
+    return _cuadra(datos) and not problemas_factura(datos)
 
 
 def _extraer_con_modelo_principal(contenido: bytes) -> dict:
@@ -243,17 +284,27 @@ def _extraer_con_modelo_principal(contenido: bytes) -> dict:
     return primera
 
 
+def _debe_verificarse(resultado: dict) -> bool:
+    return VERIFICACION_DOBLE and resultado.get("es_documento_fiscal") is not False and resultado.get("confianza") != "baja" \
+        and not resultado.get("_lectura_fallida")
+
+
 def extraer_factura(contenido: bytes) -> dict:
     """
-    Con MODELO_EXTRACCION_RAPIDA definido (y sin COMPARAR_MODELOS): primera lectura con el modelo barato; si es clara y cuadra
-    se acepta, y si no, se lee con el modelo principal como siempre. Sin esa variable, siempre el modelo principal.
+    Sin variables: lectura con el modelo principal (repetida si sale dudosa) y, después, las comprobaciones de validaciones.py.
+    MODELO_EXTRACCION_RAPIDA: primera lectura con el modelo barato; si es clara y cuadra se acepta; si no, se lee con el principal.
+    VERIFICACION_DOBLE=1: además, solo se acepta si una segunda lectura (con el otro modelo) coincide en lo crítico.
+    COMPARAR_MODELOS=1: se sigue decidiendo con el principal y el barato solo anota cuántas veces coincide.
     """
     if MODELO_RAPIDO and not COMPARAR_MODELOS:
         rapida = _leer(contenido, MODELO_RAPIDO)
         if _fiable(rapida):
-            return rapida
+            if not _debe_verificarse(rapida):
+                return rapida
+            return _acordar(rapida, _leer(contenido))          # segunda opinión del modelo principal
         log.info("Lectura rápida dudosa: se repite con el modelo principal")
-        return _extraer_con_modelo_principal(contenido)
+        resultado = _extraer_con_modelo_principal(contenido)
+        return _acordar(resultado, rapida) if _debe_verificarse(resultado) else resultado
 
     resultado = _extraer_con_modelo_principal(contenido)
     if MODELO_RAPIDO and COMPARAR_MODELOS and resultado.get("es_documento_fiscal") is not False and not resultado.get("_lectura_fallida"):
@@ -263,6 +314,8 @@ def extraer_factura(contenido: bytes) -> dict:
             registrar_comparacion(_fiable(rapida) and _coinciden(resultado, rapida))
         except Exception:
             log.debug("No se pudo anotar la comparación de modelos")
+    if _debe_verificarse(resultado):  # sin modelo barato, la segunda lectura es otra pasada del principal
+        return _acordar(resultado, _leer(contenido, MODELO_RAPIDO or None))
     return resultado
 
 

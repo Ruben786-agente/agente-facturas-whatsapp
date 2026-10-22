@@ -75,8 +75,14 @@ def _procesa_una_factura(factura, cif_empresa):
     tipo = _clasifica(factura, cif_empresa)
     if tipo is None:
         return None, "CIF no coincide con emisor ni destinatario de esta empresa"
+    if factura.get("_motivo_revision"):
+        return None, factura["_motivo_revision"]
     if not _valida_cuadre(factura):
         return None, "no cuadra Σ(base+cuota) con TOTAL FACTURA"
+    from validaciones import problemas_factura
+    problemas = problemas_factura(factura)
+    if problemas:
+        return None, problemas[0]
 
     contraparte = factura["emisor"] if tipo == "COMPRAS" else factura["destinatario"]
     concepto = _concepto(factura["num_factura"], contraparte.get("nombre", ""))

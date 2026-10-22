@@ -237,9 +237,15 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
         if diferir and not es_ticket(factura):
             # En un lote, la empresa puede deducirse de las demás facturas (se decide al final).
             return {"accion": "en_espera", "razon": "sin_cif", "factura": factura}
+        if factura.get("confianza") == "baja" and not (factura.get("num_factura") or factura.get("total_factura")):
+            return _sin_identificar(storage, tenant_id, nombre, contenido, "documento ilegible o borroso")
         return _sin_identificar(storage, tenant_id, nombre, contenido, "sin CIF del comprador")
     if not _cif_valido(cif):
         return _sin_identificar(storage, tenant_id, nombre, contenido, "CIF del comprador con formato no válido")
+    from validaciones import control_nif_cif_correcto
+    if control_nif_cif_correcto(cif) is False and not resolver_empresa_cliente_por_cif(tenant_id, [cif]):
+        # Un dígito mal leído crearía una empresa fantasma y archivaría la factura donde no toca: se aparta para revisarla.
+        return _sin_identificar(storage, tenant_id, nombre, contenido, "CIF del comprador con dígito de control incorrecto (posible error de lectura)")
 
     # El CIF ya normalizado se usa también dentro de la factura, para que coincida con el de la empresa.
     factura = {**factura, "destinatario": {**destinatario, "cif_nif": cif}}

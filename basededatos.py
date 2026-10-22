@@ -180,6 +180,34 @@ class IntentoLogin(Base):
     bloqueado_hasta = Column(DateTime(timezone=True))
 
 
+class CarpetaEntrada(Base):
+    """Carpeta «Entrada» de cada gestoría en su almacenamiento: lo que suba ahí se lee y se archiva solo."""
+    __tablename__ = "carpetas_entrada"
+    tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), primary_key=True)
+    proveedor = Column(String, nullable=False)  # los ids solo valen para el almacenamiento que los creó
+    entrada_id = Column(String, nullable=False)
+    procesados_id = Column(String, nullable=False)
+    no_procesables_id = Column(String, nullable=False)
+
+
+class UsoIAModelo(Base):
+    """Consumo de la IA por día y modelo (solo cifras): para saber el coste real por factura."""
+    __tablename__ = "uso_ia_modelo"
+    dia = Column(String, primary_key=True)      # AAAA-MM-DD
+    modelo = Column(String, primary_key=True)
+    llamadas = Column(Integer, nullable=False, default=0)
+    tokens_entrada = Column(Integer, nullable=False, default=0)
+    tokens_salida = Column(Integer, nullable=False, default=0)
+
+
+class ComparacionModelos(Base):
+    """Cuántas veces el modelo barato ha leído lo mismo que el modelo principal (solo contadores)."""
+    __tablename__ = "comparacion_modelos"
+    dia = Column(String, primary_key=True)
+    comparadas = Column(Integer, nullable=False, default=0)
+    coinciden = Column(Integer, nullable=False, default=0)
+
+
 class UsoIA(Base):
     """Consumo de la IA por día (solo cifras, sin datos de nadie): sirve para calcular el coste real por factura."""
     __tablename__ = "uso_ia"
@@ -332,7 +360,7 @@ def eliminar_gestoria(tenant_id):
             session.query(EstadoSondeo).filter(EstadoSondeo.empresa_cliente_id.in_(ids_empresas)).delete(synchronize_session=False)
         for modelo in (FacturaCache, CorreoProcesado, CorreoIntento, DocumentoVisto, EstadoCorreo,
                        DocumentoSinIdentificar, Aviso, NotificacionEnviada, NumeroWhatsapp,
-                       CredencialAlmacenamiento, EmpresaCliente):
+                       CredencialAlmacenamiento, CarpetaEntrada, EmpresaCliente):
             session.query(modelo).filter_by(tenant_id=tenant_id).delete(synchronize_session=False)
         session.query(Gestoria).filter_by(tenant_id=tenant_id).delete(synchronize_session=False)
         session.commit()
@@ -1172,15 +1200,16 @@ def registrar_sin_identificar(tenant_id, nombre_archivo, motivo):
         session.close()
 
 
-def registrar_uso_ia(tokens_entrada, tokens_salida):
-    """Suma una llamada a la IA al contador del día. Nunca debe romper la lectura de una factura."""
+def registrar_uso_ia(tokens_entrada, tokens_salida, modelo=""):
+    """Suma una llamada a la IA al contador del día y del modelo. Nunca debe romper la lectura de una factura."""
     dia = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    modelo = modelo or "(sin indicar)"
     for _ in range(2):
         session = _obtener_session()
         try:
-            r = session.get(UsoIA, dia)
+            r = session.get(UsoIAModelo, (dia, modelo))
             if r is None:
-                r = UsoIA(dia=dia, llamadas=0, tokens_entrada=0, tokens_salida=0)
+                r = UsoIAModelo(dia=dia, modelo=modelo, llamadas=0, tokens_entrada=0, tokens_salida=0)
                 session.add(r)
             r.llamadas = (r.llamadas or 0) + 1
             r.tokens_entrada = (r.tokens_entrada or 0) + int(tokens_entrada or 0)
@@ -1194,9 +1223,100 @@ def registrar_uso_ia(tokens_entrada, tokens_salida):
 
 
 def obtener_uso_ia(dias=30):
+    """Filas por día y modelo (lo más reciente primero), incluyendo lo contado antes de distinguir modelos."""
     session = _obtener_session()
     try:
-        filas = session.query(UsoIA).order_by(UsoIA.dia.desc()).limit(dias).all()
-        return [{"dia": f.dia, "llamadas": f.llamadas, "entrada": f.tokens_entrada, "salida": f.tokens_salida} for f in filas]
+        filas = [{"dia": f.dia, "modelo": f.modelo, "llamadas": f.llamadas, "entrada": f.tokens_entrada, "salida": f.tokens_salida}
+                 for f in session.query(UsoIAModelo).all()]
+        filas += [{"dia": f.dia, "modelo": "(antes de separar por modelo)", "llamadas": f.llamadas, "entrada": f.tokens_entrada,
+                   "salida": f.tokens_salida} for f in session.query(UsoIA).all()]
+        dias_ordenados = sorted({f["dia"] for f in filas}, reverse=True)[:dias]
+        return sorted([f for f in filas if f["dia"] in dias_ordenados], key=lambda f: (f["dia"], f["modelo"]), reverse=True)
+    finally:
+        session.close()
+
+
+def registrar_comparacion(coincide):
+    dia = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    for _ in range(2):
+        session = _obtener_session()
+        try:
+            r = session.get(ComparacionModelos, dia)
+            if r is None:
+                r = ComparacionModelos(dia=dia, comparadas=0, coinciden=0)
+                session.add(r)
+            r.comparadas = (r.comparadas or 0) + 1
+            r.coinciden = (r.coinciden or 0) + (1 if coincide else 0)
+            session.commit()
+            return
+        except Exception:
+            session.rollback()
+        finally:
+            session.close()
+
+
+def obtener_comparacion():
+    """(comparadas, coinciden) acumulado de todos los días."""
+    session = _obtener_session()
+    try:
+        filas = session.query(ComparacionModelos).all()
+        return sum(f.comparadas for f in filas), sum(f.coinciden for f in filas)
+    finally:
+        session.close()
+
+
+# ---------------------------------------------------------------------------
+# Carpeta de entrada (documentos que la gestoría sube a mano a su almacenamiento)
+# ---------------------------------------------------------------------------
+
+def obtener_carpetas_entrada(tenant_id, proveedor):
+    """Ids de «Entrada», «Procesados» y «No procesables», o None si no existen o son de otro almacenamiento."""
+    session = _obtener_session()
+    try:
+        c = session.get(CarpetaEntrada, tenant_id)
+        if c is None or c.proveedor != proveedor:
+            return None
+        return {"entrada": c.entrada_id, "procesados": c.procesados_id, "no_procesables": c.no_procesables_id}
+    finally:
+        session.close()
+
+
+def guardar_carpetas_entrada(tenant_id, proveedor, entrada, procesados, no_procesables):
+    session = _obtener_session()
+    try:
+        c = session.get(CarpetaEntrada, tenant_id)
+        if c is None:
+            c = CarpetaEntrada(tenant_id=tenant_id)
+            session.add(c)
+        c.proveedor, c.entrada_id, c.procesados_id, c.no_procesables_id = proveedor, entrada, procesados, no_procesables
+        session.commit()
+    finally:
+        session.close()
+
+
+def olvidar_carpetas_entrada(tenant_id):
+    session = _obtener_session()
+    try:
+        session.query(CarpetaEntrada).filter_by(tenant_id=tenant_id).delete(synchronize_session=False)
+        session.commit()
+    finally:
+        session.close()
+
+
+def tenants_con_almacenamiento():
+    """Gestorías con acceso vigente (prueba o suscripción) y un almacenamiento conectado."""
+    session = _obtener_session()
+    try:
+        ahora = datetime.now(timezone.utc)
+        resultado = []
+        for g in session.query(Gestoria).filter(Gestoria.activa == True).all():  # noqa: E712
+            vigente = g.plan_suscripcion == "activo" or (
+                g.plan_suscripcion == "trial" and g.trial_expira_en and _como_aware_utc(g.trial_expira_en) > ahora)
+            if not vigente:
+                continue
+            provs = {c.proveedor for c in session.query(CredencialAlmacenamiento).filter_by(tenant_id=g.tenant_id)}
+            if {"onedrive", "gdrive"} & provs:
+                resultado.append(g.tenant_id)
+        return resultado
     finally:
         session.close()
