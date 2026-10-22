@@ -1030,6 +1030,19 @@ def marcar_revisada(tenant_id, factura_id):
         session.close()
 
 
+def obtener_otra_revision(tenant_id, excluir_id=None):
+    """Id de otra factura pendiente en Revisión que se pueda corregir (con su lectura guardada), o None."""
+    session = _obtener_session()
+    try:
+        q = session.query(FacturaCache).filter_by(tenant_id=tenant_id, destino="REVISION")
+        for f in q.order_by(FacturaCache.id).all():
+            if f.id != excluir_id and f.datos_json and '"factura"' in f.datos_json:
+                return f.id
+        return None
+    finally:
+        session.close()
+
+
 def eliminar_factura_cache(tenant_id, factura_id):
     session = _obtener_session()
     try:

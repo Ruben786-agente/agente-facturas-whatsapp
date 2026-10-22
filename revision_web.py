@@ -145,12 +145,38 @@ PLANTILLA_CORREGIR = pagina("Corregir factura", """
       {% endfor %}
     </table></div>
     <div class="pie-formulario">
-      <button class="btn principal grande" type="submit">Añadir al Excel</button>
+      <button class="btn principal grande" type="submit" name="accion" value="anadir">Añadir al Excel</button>
+      <button class="btn" type="submit" name="accion" value="gestionada" formnovalidate
+        onclick="return confirm('¿Marcar como gestionada? Ya no aparecerá en el panel y no se añadirá al Excel desde aquí.');">Ya la he gestionado yo: marcar como gestionada</button>
       <a class="btn" href="{{ url_for('revision.abrir_revision', factura_id=factura_id) }}" target="_blank" rel="noopener">Ver el original</a>
     </div>
   </form>
 </main>
 """, extra_head=CSS_CORREGIR)
+
+
+PLANTILLA_CONFIRMACION = pagina("Hecho", """
+<main class="pagina estrecha" style="max-width:700px;">
+  <div class="mensaje" role="status" style="margin-top:28px; padding:22px 24px;">
+    <h1 style="font-size:30px; margin:0 0 8px;">&#10003; {{ titulo }}</h1>
+    <p style="margin:0;">{{ detalle }}</p>
+  </div>
+  <div class="pie-formulario" style="margin-top:24px;">
+    <a class="btn principal grande" href="{{ url_for('panel.panel') }}">Volver al panel</a>
+    {% if otra %}<a class="btn" href="{{ url_for('revision.corregir', factura_id=otra) }}">Corregir la siguiente en Revisión</a>{% endif %}
+  </div>
+</main>
+""", extra_head=CSS_CORREGIR)
+
+
+def _confirmacion(tenant_id, titulo, detalle, excluir=None):
+    try:
+        from basededatos import obtener_otra_revision
+        otra = obtener_otra_revision(tenant_id, excluir)
+    except Exception:
+        otra = None
+    return render_template_string(PLANTILLA_CONFIRMACION, titulo=titulo, detalle=detalle, otra=otra,
+                                  gestoria_nombre=obtener_estado_conexiones(tenant_id)["nombre"])
 
 
 def _valores_formulario(factura):
@@ -205,6 +231,13 @@ def corregir(factura_id):
     original = r["datos"]["factura"]
     error, valores = None, _valores_formulario(original)
 
+    if request.method == "POST" and request.form.get("accion") == "gestionada":
+        if marcar_revisada(tenant_id, factura_id):
+            return _confirmacion(tenant_id, "Marcada como gestionada",
+                                 "Ya no aparece en la lista de Revisión. No se ha añadido nada al Excel.", factura_id)
+        flash("Esta factura ya no estaba pendiente.")
+        return redirect(url_for("panel.panel"))
+
     if request.method == "POST":
         try:
             nueva = _factura_desde_formulario(original, request.form)
@@ -213,12 +246,14 @@ def corregir(factura_id):
             if not storage:
                 raise RuntimeError("No hay almacenamiento conectado")
             res = reprocesar_revision(storage, tenant_id, factura_id, nueva)
+            resumen = f"Factura {nueva.get('num_factura') or ''} de {(nueva.get('emisor') or {}).get('nombre') or 'su proveedor'}, total {nueva.get('total_factura')} €."
             if res["accion"] == "procesada":
-                flash("Factura añadida al Excel.")
-                return redirect(url_for("panel.panel"))
+                return _confirmacion(tenant_id, "Factura añadida al Excel",
+                                     f"{resumen} Se ha anotado en el Excel de {r['empresa']['nombre']}"
+                                     + (f" ({res['excel']})." if res.get("excel") else "."), factura_id)
             if res["accion"] == "duplicado_exacto":
-                flash("Esa factura ya estaba anotada en el Excel; se ha quitado de la lista.")
-                return redirect(url_for("panel.panel"))
+                return _confirmacion(tenant_id, "Esa factura ya estaba en el Excel",
+                                     f"{resumen} Ya estaba anotada, así que no se ha duplicado y se ha quitado de la lista.", factura_id)
             error = res.get("motivo") or "no se pudo añadir"
         except ValueError as e:
             error = str(e) or "revise que los números estén bien escritos"
