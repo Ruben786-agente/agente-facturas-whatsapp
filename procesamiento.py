@@ -398,7 +398,9 @@ def reprocesar_revision(storage, tenant_id, factura_id, factura):
     archivo = storage.buscar_archivo_por_nombre(empresa["carpeta_revision_id"], nombre_revision) if nombre_revision else None
     contenido = storage.descargar_archivo(archivo.id) if archivo else None
 
-    factura = {**factura, "confianza": "alta"}  # la ha revisado una persona
+    # La ha revisado una persona: ya no valen la duda de la IA ni el motivo que la mandó a Revisión (p. ej. «las dos lecturas no coinciden»).
+    factura = {k: v for k, v in factura.items() if k not in ("_motivo_revision", "relectura")}
+    factura["confianza"] = "alta"
     res = _guardar_factura(storage, tenant_id, empresa, original, contenido, factura, reintento=True)
     if res["accion"] == "procesada":
         eliminar_factura_cache(tenant_id, factura_id)  # _guardar_factura ya ha creado su registro PROCESADA
