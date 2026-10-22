@@ -70,6 +70,8 @@ def _escribe_hoja(ws, cif_empresa, nombre_empresa, periodo, filas):
 
 
 def _procesa_una_factura(factura, cif_empresa):
+    if factura.get("_motivo_revision"):   # el motivo concreto (p. ej. «las dos lecturas no coinciden en: total») va antes que el genérico
+        return None, factura["_motivo_revision"]
     if factura.get("confianza") == "baja":
         return None, "confianza baja del OCR/IA"
     tipo = _clasifica(factura, cif_empresa)

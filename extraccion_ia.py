@@ -54,6 +54,8 @@ ESTRUCTURA (todos los campos son obligatorios):
 }
 
 REGLAS:
+0. El documento puede venir girado (de lado o boca abajo), torcido o escaneado en baja resolución. Léelo igualmente
+   como si estuviera derecho, fijándote con especial cuidado en cada dígito del NIF/CIF y de los importes.
 1. es_documento_fiscal: true si es una factura, factura simplificada, ticket de compra o abono
    (factura rectificativa). false SOLO si es claramente otra cosa: albarán, presupuesto, pedido,
    contrato, publicidad, firma de correo, o una página completamente en blanco. Si dudas entre
