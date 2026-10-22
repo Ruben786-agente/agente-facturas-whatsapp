@@ -88,12 +88,13 @@ CSS_CONEXIONES = """
   .paso .n { grid-row: span 3; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--linea-fuerte); display: grid; place-items: center;
              font: 500 16px/1 var(--serif); color: var(--tinta-2); }
   .paso.hecho .n { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .paso > :not(.n) { grid-column: 2; }
   .paso h3 { font-size: 20px; }
   .paso .que { color: var(--tinta-2); margin: 0; }
   .paso .estado-linea { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
   .conectado { color: var(--ok); font-weight: 500; }
   .paso.opcional .n { border-style: dashed; }
-  @media (max-width: 560px) { .paso { grid-template-columns: 1fr; } .paso .n { display: none; } }
+  @media (max-width: 560px) { .paso { grid-template-columns: 1fr; } .paso .n { display: none; } .paso > :not(.n) { grid-column: 1; } }
 </style>
 """
 
