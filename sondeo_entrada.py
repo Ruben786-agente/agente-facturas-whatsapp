@@ -34,7 +34,7 @@ NOMBRE_ENTRADA = "Entrada"
 NOMBRE_PROCESADOS = "Procesados"
 NOMBRE_NO_PROCESABLES = "No procesables"
 
-EXTENSIONES = {".pdf", ".jpg", ".jpeg", ".png"}
+from formatos import EXTENSIONES
 IGNORAR = {".ds_store", "thumbs.db", "desktop.ini"}  # archivos que crean el sistema o el sincronizador
 MAX_BYTES = 25 * 1024 * 1024
 MAX_INTENTOS = 5          # a los 5 fallos seguidos se aparta el archivo y se avisa
@@ -106,8 +106,9 @@ def _listar_con_reparacion(storage, tenant_id, proveedor, carpetas):
 
 
 def _es_lectura_posible(contenido):
-    """PDF, JPEG o PNG de verdad (la extensión puede engañar: por ejemplo una foto HEIC llamada .jpg)."""
-    return (contenido[:4] == b"%PDF" or contenido[:3] == b"\xff\xd8\xff" or contenido[:8] == b"\x89PNG\r\n\x1a\n")
+    """PDF, imagen o ZIP de verdad (la extensión puede engañar)."""
+    from formatos import tipo_real
+    return tipo_real(contenido) is not None
 
 
 def _mover(storage, archivo, carpeta_destino, con_fecha=True):
@@ -138,7 +139,7 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
         extension = os.path.splitext(archivo.nombre)[1].lower()
         try:
             if extension not in EXTENSIONES or archivo.tamano_bytes > MAX_BYTES:
-                motivo = "no es PDF ni imagen (JPG o PNG)" if extension not in EXTENSIONES else "pesa demasiado (más de 25 MB)"
+                motivo = "formato no admitido (use PDF, imagen o ZIP)" if extension not in EXTENSIONES else "pesa demasiado (más de 25 MB)"
                 _mover(storage, archivo, carpetas["no_procesables"])
                 apartados_no_leibles.append(f"{archivo.nombre} ({motivo})")
                 resumen["apartados"] += 1
@@ -146,7 +147,7 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
             contenido = storage.descargar_archivo(archivo.id)
             if not _es_lectura_posible(contenido):
                 _mover(storage, archivo, carpetas["no_procesables"])
-                apartados_no_leibles.append(f"{archivo.nombre} (el archivo no se puede leer; si es una foto, guárdela como JPG o PNG)")
+                apartados_no_leibles.append(f"{archivo.nombre} (el archivo no se puede leer; si es una foto, guárdela como JPG)")
                 resumen["apartados"] += 1
                 continue
             resultados = procesar_archivo(storage, tenant_id, contenido, archivo.nombre)

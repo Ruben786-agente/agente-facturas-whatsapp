@@ -10,3 +10,5 @@ anthropic
 msal
 openpyxl
 pypdf
+pillow
+pillow-heif

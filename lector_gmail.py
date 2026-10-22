@@ -6,12 +6,12 @@ import requests
 
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
 MIN_BYTES_IMAGEN = 30_000  # descarta logos y firmas
-EXTENSIONES = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
+from formatos import EXTENSIONES, EXTENSIONES_IMAGEN
 
 
 def _ext(nombre):
     n = (nombre or "").lower()
-    return next((e for e in EXTENSIONES if n.endswith(e)), None)
+    return next((e for e in sorted(EXTENSIONES) if n.endswith(e)), None)
 
 
 class LectorGmail:
@@ -63,10 +63,10 @@ class LectorGmail:
             mime = parte.get("mimeType", "")
             if ext is None:
                 continue
-            if mime not in ("application/octet-stream", EXTENSIONES[ext], "") and not mime.startswith(("application/", "image/")):
+            if not mime.startswith(("application/", "image/", "text/")) and mime != "":
                 continue
             cabeceras = {h["name"].lower(): h["value"] for h in parte.get("headers", [])}
-            es_imagen = ext != ".pdf"
+            es_imagen = ext in EXTENSIONES_IMAGEN
             if es_imagen and "content-id" in cabeceras:
                 continue  # imagen incrustada en el cuerpo (firma, logo)
             if es_imagen and (parte["body"].get("size", 0) < MIN_BYTES_IMAGEN):

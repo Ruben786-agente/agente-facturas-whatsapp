@@ -76,7 +76,7 @@ def _nombre_unico(nombre_original, factura, contenido):
     llamen igual ("factura.pdf") no deben pisarse, así que el nombre sale de
     los datos de la factura más una huella corta del contenido.
     """
-    ext = {"application/pdf": ".pdf", "image/png": ".png"}.get(_detectar_media_type(contenido), ".jpg")
+    ext = ".xml" if contenido[:1] in (b"<", b"\xef") else {"application/pdf": ".pdf", "image/png": ".png"}.get(_detectar_media_type(contenido), ".jpg")
     sello = hashlib.sha1(contenido).hexdigest()[:8]
     partes = []
     fecha = factura.get("fecha_factura") or ""
@@ -295,6 +295,29 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
     reintente (las facturas ya anotadas no se duplican).
     """
     import dividir_pdf
+    import formatos
+
+    if formatos.tipo_real(contenido) not in ("pdf", "jpg", "png", "facturae"):
+        # HEIC, WebP, TIFF, ZIP...: se convierte a PDF/JPG/PNG y cada archivo resultante sigue el camino normal.
+        listos, fallidos = formatos.normalizar(nombre_original, contenido)
+        resultados = []
+        for nombre_n, contenido_n in listos:
+            resultados += procesar_archivo(storage, tenant_id, contenido_n, nombre_n, extraer, dividir)
+        if fallidos:
+            motivo = fallidos[0][1] if len(fallidos) == 1 else f"{len(fallidos)} archivos no legibles"
+            log.info("'%s': no se pudieron leer %s", nombre_original, fallidos)
+            resultados.append(_sin_identificar(storage, tenant_id, nombre_original, contenido, motivo))
+        return resultados
+
+    if formatos.tipo_real(contenido) == "facturae":
+        from facturae import leer_facturae
+        try:
+            facturas = leer_facturae(contenido)
+        except ValueError as e:
+            return [_sin_identificar(storage, tenant_id, nombre_original, contenido, f"Facturae no legible ({str(e)[:40]})")]
+        if len(facturas) > 1:
+            return [_sin_identificar(storage, tenant_id, nombre_original, contenido, f"Facturae con {len(facturas)} facturas, repártalas")]
+        return [_procesar_sin_repetir(storage, tenant_id, contenido, nombre_original, extraer or (lambda c: facturas[0]))]
 
     total = dividir_pdf.contar_paginas(contenido) if contenido[:4] == b"%PDF" else 0
     if total <= 1:

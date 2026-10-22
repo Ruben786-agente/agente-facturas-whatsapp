@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import requests
 
-from lector_gmail import EXTENSIONES, MIN_BYTES_IMAGEN, _ext
+from lector_gmail import EXTENSIONES, EXTENSIONES_IMAGEN, MIN_BYTES_IMAGEN, _ext
 
 API = "https://graph.microsoft.com/v1.0/me"
 CARPETAS_EXCLUIDAS = ("sentitems", "drafts", "deleteditems", "junkemail", "outbox")
@@ -84,7 +84,7 @@ class LectorOutlook:
                 ext = _ext(nombre)
                 if ext is None:
                     continue
-                if ext != ".pdf" and (adj.get("isInline") or adj.get("size", 0) < MIN_BYTES_IMAGEN):
+                if ext in EXTENSIONES_IMAGEN and (adj.get("isInline") or adj.get("size", 0) < MIN_BYTES_IMAGEN):
                     continue  # logos y firmas
                 r = requests.get(f"{API}/messages/{mensaje_id}/attachments/{adj['id']}/$value", headers=self._h, timeout=120)
                 r.raise_for_status()
