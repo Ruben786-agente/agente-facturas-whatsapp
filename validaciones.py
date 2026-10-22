@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 LETRAS_NIF = "TRWAGMYFPDXBNJZSQVHLCKE"
 LETRAS_CIF = "JABCDEFGHI"
 IVA_VALIDOS = {0.0, 4.0, 5.0, 10.0, 21.0}
-RECARGO_DE = {21.0: 5.2, 10.0: 1.4, 5.0: 0.62, 4.0: 0.5, 0.0: 0.0}
+RECARGO_DE = {21.0: (5.2,), 10.0: (1.4,), 5.0: (0.62, 0.625), 4.0: (0.5,), 0.0: (0.0,)}  # el 5 % lleva 0,62 %, y muchas facturas imprimen 0,625
 MAX_ANTIGUEDAD = timedelta(days=366 * 5)
 MARGEN_FUTURO = timedelta(days=7)
 
@@ -92,7 +92,7 @@ def problemas_factura(factura, hoy=None):
             problemas.append(f"la cuota de IVA ({cuota:.2f}) no es el {pct:g} % de la base ({base:.2f}): posible error de lectura")
         pct_rec, cuota_rec = _dinero(d.get("pct_recargo")), _dinero(d.get("cuota_recargo"))
         if pct_rec:
-            if RECARGO_DE.get(pct) != pct_rec:
+            if pct_rec not in RECARGO_DE.get(pct, ()):
                 problemas.append(f"recargo de equivalencia del {pct_rec:g} % que no corresponde a un IVA del {pct:g} %")
             elif cuota_rec is None or abs(cuota_rec - base * pct_rec / 100) > _tolerancia(base * pct_rec / 100):
                 problemas.append("la cuota del recargo de equivalencia no cuadra con la base")

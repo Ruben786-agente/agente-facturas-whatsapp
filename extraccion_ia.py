@@ -74,7 +74,8 @@ REGLAS:
 9. es_factura_simplificada: true si pone "factura simplificada" o equivalente.
    sin_cif_destinatario: true si en ningún sitio aparece el NIF/CIF del comprador.
    formato_ticket_tpv: true si parece un recibo de datáfono/TPV y no una factura formal.
-10. confianza: "alta" si todo se lee con claridad; "media" si algún dato secundario es dudoso;
+10. confianza: que el documento sea una foto de papel, con sombras, algo torcido o con la página doblada
+    NO baja la confianza si todos los datos se leen con claridad. "alta" si todo se lee con claridad; "media" si algún dato secundario es dudoso;
     "baja" si el CIF, los importes o el total no se leen con seguridad, o si la suma de bases
     y cuotas no coincide con el total.
 """
