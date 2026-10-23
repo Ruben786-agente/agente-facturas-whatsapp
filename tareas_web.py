@@ -18,6 +18,17 @@ from flask import Blueprint, request
 log = logging.getLogger("tareas_web")
 bp_tareas = Blueprint("tareas", __name__)
 
+def _liberar_memoria():
+    """Tras cada ciclo se devuelve al sistema la memoria que Python ya no usa (el plan gratuito de Render tiene solo 512 MB)."""
+    import gc
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
 _candado = threading.Lock()
 _en_marcha = False
 
@@ -29,12 +40,14 @@ def _ejecutar_ciclo():
         ciclo_correo()
     except Exception:
         log.exception("Fallo en el ciclo de correo")
+    _liberar_memoria()
     try:  # archivos que la gestoría sube a mano a su carpeta «Entrada»
         from sondeo_entrada import ciclo_entrada
         ciclo_entrada()
     except Exception:
         log.exception("Fallo en el ciclo de la carpeta de entrada")
     finally:
+        _liberar_memoria()
         with _candado:
             _en_marcha = False
 

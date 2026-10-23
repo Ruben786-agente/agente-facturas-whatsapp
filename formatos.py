@@ -19,7 +19,9 @@ EXTENSIONES = {".xml", ".xsig", ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif"
 EXTENSIONES_IMAGEN = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".tif", ".tiff", ".bmp"}
 MAX_ARCHIVOS_ZIP = 50
 MAX_BYTES_ZIP_DESCOMPRIMIDO = 150 * 1024 * 1024
-MAX_PIXELES = 60_000_000
+MAX_BYTES_IMAGEN_IA = 4_000_000   # la API de Claude admite hasta 5 MB por imagen
+MAX_PIXELES = 24_000_000      # por encima, la imagen no se abre (una foto de 12 Mpx ya es grande de sobra para leer una factura)
+LADO_MAX = 3000               # se reduce a este lado largo: la IA no gana nada con más y el servidor gasta mucha memoria
 
 try:
     import pillow_heif
@@ -57,33 +59,48 @@ def _es_office(contenido):
 
 def _a_jpg_o_pdf(contenido, nombre):
     from PIL import Image, ImageOps
-    Image.MAX_IMAGE_PIXELS = MAX_PIXELES
+    Image.MAX_IMAGE_PIXELS = 200_000_000
     img = Image.open(io.BytesIO(contenido))
+    if img.width * img.height > MAX_PIXELES and (img.format or "").upper() != "JPEG":   # un JPEG se decodifica ya reducido (draft)
+        raise ValueError("imagen demasiado grande")
     base = os.path.splitext(os.path.basename(nombre))[0]
     paginas = getattr(img, "n_frames", 1)
     if paginas > 1 and (img.format or "").upper() == "TIFF":
         marcos = []
         for i in range(min(paginas, 100)):
             img.seek(i)
-            marcos.append(ImageOps.exif_transpose(img).convert("RGB"))
+            marco = img.convert("RGB")
+            marco.thumbnail((LADO_MAX, LADO_MAX))
+            marcos.append(marco)
         salida = io.BytesIO()
         marcos[0].save(salida, "PDF", save_all=True, append_images=marcos[1:], resolution=200.0)
         return salida.getvalue(), base + ".pdf"
-    img = ImageOps.exif_transpose(img)
+    img.draft("RGB", (LADO_MAX, LADO_MAX))      # JPEG: se decodifica ya reducida
     if img.mode in ("RGBA", "LA", "P"):
-        fondo = Image.new("RGB", img.size, "white")
-        fondo.paste(img.convert("RGBA"), mask=img.convert("RGBA").split()[-1])
-        img = fondo
-    else:
+        rgba = img.convert("RGBA")
+        img = Image.new("RGB", rgba.size, "white")
+        img.paste(rgba, mask=rgba.split()[-1])
+        del rgba
+    elif img.mode != "RGB":
         img = img.convert("RGB")
+    img.thumbnail((LADO_MAX, LADO_MAX))
+    ImageOps.exif_transpose(img, in_place=True)  # sin copia
     salida = io.BytesIO()
-    img.save(salida, "JPEG", quality=92)
+    img.save(salida, "JPEG", quality=90)
     return salida.getvalue(), base + ".jpg"
 
 
 def normalizar(nombre, contenido, _nivel=0):
     """Devuelve (lista de (nombre, contenido) en PDF/JPG/PNG, lista de (nombre, motivo) de los que no se pudieron leer)."""
     tipo = tipo_real(contenido)
+    if tipo in ("jpg", "png") and len(contenido) > MAX_BYTES_IMAGEN_IA:
+        # la API de Claude rechaza imágenes de más de 5 MB: se reduce (y de paso se gasta menos memoria y menos IA)
+        try:
+            nuevo, nombre_nuevo = _a_jpg_o_pdf(contenido, nombre)
+            return [(nombre_nuevo, nuevo)], []
+        except Exception as e:
+            log.warning("No se pudo reducir '%s': %s", nombre, e)
+            return [], [(nombre, "imagen demasiado grande (reduzca su tamaño)")]
     if tipo in ("pdf", "jpg", "png", "facturae"):
         return [(nombre, contenido)], []
     if tipo == "otra_imagen":
@@ -92,7 +109,8 @@ def normalizar(nombre, contenido, _nivel=0):
             return [(nombre_nuevo, nuevo)], []
         except Exception as e:
             log.warning("No se pudo convertir '%s': %s", nombre, e)
-            return [], [(nombre, "imagen que no se puede abrir (si es una foto HEIC, expórtela como JPG)")]
+            motivo = "imagen demasiado grande (reduzca su tamaño)" if "demasiado grande" in str(e) or "decompression" in str(e).lower() else "imagen que no se puede abrir (si es una foto HEIC, expórtela como JPG)"
+            return [], [(nombre, motivo)]
     if tipo == "zip":
         if _nivel >= 1:
             return [], [(nombre, "ZIP dentro de otro ZIP")]
