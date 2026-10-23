@@ -29,8 +29,9 @@ PROVEEDORES = {"onedrive", "gdrive"}
 CSS_SUBIDA = """
 <style>
   .zona { margin-top: 24px; border: 2px dashed var(--linea-fuerte); border-radius: 12px; background: var(--superficie);
-          padding: 44px 24px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
-  .zona.encima, .zona:focus-visible { border-color: var(--marca); background: var(--marca-clara); outline: none; }
+          padding: 40px 24px; text-align: center; transition: border-color .15s, background .15s; }
+  .oculto { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  .zona.encima { border-color: var(--marca); background: var(--marca-clara); outline: none; }
   .zona strong { display: block; font-size: 20px; margin-bottom: 6px; }
   .zona p { margin: 0; color: var(--tinta-2); }
   .lista { list-style: none; margin: 22px 0 0; padding: 0; display: grid; gap: 8px; }
@@ -56,11 +57,12 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
       <a href="{{ url_for('alta.conexiones') }}">Conexiones y suscripción</a> para seguir subiendo facturas.</p>
   {% else %}
   <form id="formulario" method="post" onsubmit="return false;">
-    <div class="zona" id="zona" tabindex="0" role="button" aria-label="Elegir archivos para subir">
+    <div class="zona" id="zona">
       <strong>Arrastre los archivos aquí</strong>
-      <p>o pulse para elegirlos. PDF, fotos (JPG, PNG, HEIC...), ZIP o factura electrónica (XML). Hasta 25 MB cada uno.</p>
-      <input id="archivos" type="file" multiple hidden accept="{{ aceptar }}">
+      <p>PDF, fotos (JPG, PNG, HEIC...), ZIP o factura electrónica (XML). Hasta 25 MB cada uno.</p>
+      <label class="btn principal grande" for="archivos" style="margin-top:18px;">Elegir archivos del dispositivo</label>
     </div>
+    <input id="archivos" class="oculto" type="file" multiple accept="{{ aceptar }}">
   </form>
   <ul class="lista" id="lista" aria-live="polite"></ul>
   <p class="tenue" id="resumen" style="margin-top:16px;"></p>
@@ -70,8 +72,6 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
     var lista = document.getElementById('lista'), resumen = document.getElementById('resumen');
     var token = (document.querySelector('input[name=csrf_token]') || {}).value || '';
     var MAX = 25 * 1024 * 1024, cola = [], ocupado = false, subidos = 0, fallidos = 0;
-    zona.addEventListener('click', function () { entrada.click(); });
-    zona.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); entrada.click(); } });
     ['dragenter', 'dragover'].forEach(function (n) { zona.addEventListener(n, function (e) { e.preventDefault(); zona.classList.add('encima'); }); });
     ['dragleave', 'drop'].forEach(function (n) { zona.addEventListener(n, function (e) { e.preventDefault(); zona.classList.remove('encima'); }); });
     zona.addEventListener('drop', function (e) { anadir(e.dataTransfer.files); });
