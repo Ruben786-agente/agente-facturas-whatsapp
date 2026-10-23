@@ -152,8 +152,8 @@ def _meta(titulo_seo, descripcion, ruta):
 
 PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de miEos", CABECERA + """
 <section class="p-hero"><div class="p-hero-in">
-  <h1>Sus clientes envían las facturas. El Excel del trimestre ya está hecho.</h1>
-  <p class="sub">El agente lee cada factura que llega a su correo, la anota en el formato de miEos y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive.</p>
+  <h1>Las facturas llegan o las sube usted. El Excel del trimestre ya está hecho.</h1>
+  <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en el formato de miEos y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive.</p>
   <div class="acciones-hero">
     {% if logueada %}<a class="btn principal" href="{{ url_for('panel.panel') }}">Ir al panel</a>
     {% else %}<a class="btn principal" href="{{ url_for('alta.registro') }}">Probar 14 días gratis</a>
@@ -166,7 +166,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
   <h2>Cómo funciona</h2>
   <div class="pasos-p">
     <div><h3>Conecte su correo y su almacenamiento</h3><p>Gmail u Outlook / Microsoft 365 para recibir, y OneDrive o Google Drive para archivar. Son dos clics y no instala nada.</p></div>
-    <div><h3>Sus clientes siguen enviando como siempre</h3><p>Facturas y tickets, en PDF o en foto, a su correo habitual. No tienen que cambiar nada.</p></div>
+    <div><h3>Llegan por correo o las sube usted</h3><p>Sus clientes siguen enviando facturas y tickets, en PDF o en foto, a su correo habitual, sin cambiar nada. Y usted puede subir directamente PDF, fotos escaneadas o lotes en ZIP desde el panel.</p></div>
     <div><h3>El agente lo deja hecho</h3><p>Lee cada documento, lo anota en el Excel del cliente y del trimestre y guarda el original en su carpeta.</p></div>
   </div>
 </section>

@@ -140,6 +140,7 @@ BARRA = (
     '<a class="marca" href="{{ url_for(\'panel.panel\') }}">' + LOGO + 'Agente Facturas</a>'
     '<nav aria-label="Principal">'
     '<a href="{{ url_for(\'panel.panel\') }}" {% if activa == \'panel\' %}class="activa" aria-current="page"{% endif %}>Panel</a>'
+    '<a href="{{ url_for(\'subida.subir\') }}" {% if activa == \'subir\' %}class="activa" aria-current="page"{% endif %}>Subir facturas</a>'
     '<a href="{{ url_for(\'alta.conexiones\') }}" {% if activa == \'conexiones\' %}class="activa" aria-current="page"{% endif %}>Conexiones y suscripción</a>'
     '</nav>'
     '<div class="usuario"><span class="nombre">{{ gestoria_nombre or "" }}</span>'

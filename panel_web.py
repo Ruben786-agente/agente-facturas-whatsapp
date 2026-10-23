@@ -199,7 +199,7 @@ PLANTILLA_PANEL = pagina("Panel", """
       {% endfor %}
     </table></div>
     {% else %}
-    <div class="vacio"><strong>Todavía no hay facturas procesadas.</strong>Cuando lleguen correos con facturas a su correo, verá aquí cada cliente por trimestre.</div>
+    <div class="vacio"><strong>Todavía no hay facturas procesadas.</strong>Cuando lleguen facturas a su correo, o las <a href="{{ url_for('subida.subir') }}">suba usted directamente</a>, verá aquí cada cliente por trimestre.</div>
     {% endif %}
   </section>
 </main>

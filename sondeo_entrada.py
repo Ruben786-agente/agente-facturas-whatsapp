@@ -8,8 +8,9 @@ y el agente los lee con el mismo proceso que los adjuntos del correo (divide los
 cada una a su empresa por el CIF, controla duplicados y manda lo dudoso a Revisión o «Sin identificar»).
 Cuando un archivo está tratado se mueve a «Entrada / Procesados»; los que no se pueden leer, a «Entrada / No procesables».
 
-Solo se activa para los almacenamientos de ENTRADA_PROVEEDORES (por defecto solo OneDrive). Con Google Drive, el permiso
-actual («drive.file») solo deja ver lo que crea el propio agente y no los archivos que sube la gestoría a mano.
+Se vigila en OneDrive y en Google Drive (ENTRADA_PROVEEDORES). Con Google Drive, el permiso actual («drive.file») solo deja
+ver lo que crea el propio agente, así que allí no sirven los archivos que la gestoría arrastra a mano a la carpeta: se suben
+desde «Subir facturas» del panel (subida_web.py), que los guarda en Entrada a través del agente.
 
 Variables opcionales: ENTRADA_MAX_POR_CICLO (por defecto 15 archivos por gestoría y ciclo), ENTRADA_PROVEEDORES.
 """
@@ -44,7 +45,7 @@ MAX_PROFUNDIDAD = 6
 
 
 def _proveedores_activos():
-    return {p.strip() for p in os.environ.get("ENTRADA_PROVEEDORES", "onedrive").split(",") if p.strip()}
+    return {p.strip() for p in os.environ.get("ENTRADA_PROVEEDORES", "onedrive,gdrive").split(",") if p.strip()}
 
 
 def asegurar_carpetas(storage, tenant_id, proveedor):

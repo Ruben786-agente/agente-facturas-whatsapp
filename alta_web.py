@@ -128,7 +128,10 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
       </div>
       {% if entrada_activa %}
       <p class="tenue" style="margin-top:12px;">¿Tiene facturas escaneadas o fotos? Déjelas, sueltas o en carpetas, en <strong>Agente Facturas / Entrada</strong> de su OneDrive y el agente las lee y las archiva solo, igual que las del correo.
-        <a href="{{ url_for('alta.abrir_entrada') }}" target="_blank" rel="noopener">Abrir la carpeta Entrada</a></p>
+        <a href="{{ url_for('alta.abrir_entrada') }}" target="_blank" rel="noopener">Abrir la carpeta Entrada</a>
+        También puede usar <a href="{{ url_for('subida.subir') }}">Subir facturas</a> desde el panel.</p>
+      {% elif e.almacenamiento == "gdrive" %}
+      <p class="tenue" style="margin-top:12px;">¿Tiene facturas escaneadas o fotos? Súbalas desde <a href="{{ url_for('subida.subir') }}">Subir facturas</a> y el agente las lee y las archiva solo, igual que las del correo.</p>
       {% endif %}
     </section>
 
@@ -232,7 +235,7 @@ def conexiones():
     from sondeo_entrada import _proveedores_activos
     estado = obtener_estado_conexiones(session["tenant_id"])
     return render_template_string(PLANTILLA_CONEXIONES, e=estado, gestoria_nombre=estado["nombre"],
-                                  entrada_activa=estado["almacenamiento"] in _proveedores_activos(),
+                                  entrada_activa=estado["almacenamiento"] == "onedrive",
                                   mensaje=request.args.get("ok"), error=request.args.get("error"))
 
 
@@ -245,8 +248,8 @@ def abrir_entrada():
     tenant_id = session["tenant_id"]
     try:
         proveedor = proveedor_almacenamiento(tenant_id)
-        if proveedor not in _proveedores_activos():
-            return redirect(url_for("alta.conexiones", error="La carpeta Entrada aún no está disponible con su almacenamiento."))
+        if proveedor != "onedrive":
+            return redirect(url_for("alta.conexiones", error="Con Google Drive use «Subir facturas» en el panel."))
         storage = storage_para_tenant(tenant_id)
         enlace = storage.obtener_enlace(asegurar_carpetas(storage, tenant_id, proveedor)["entrada"])
         if enlace.startswith("https://"):
