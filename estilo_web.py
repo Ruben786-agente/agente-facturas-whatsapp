@@ -130,10 +130,11 @@ CSS = """
 """
 
 LOGO = (
-    '<svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect width="26" height="26" rx="6" fill="#1E4D5C"/>'
-    '<path d="M7 8.5h12M7 13h12M7 17.5h7" stroke="#fff" stroke-width="1.8" stroke-linecap="round" fill="none"/>'
-    '<circle cx="19" cy="17.5" r="1.6" fill="#9FD0C0"/></svg>'
+    '<svg width="30" height="30" viewBox="0 0 120 120" aria-hidden="true">'
+    '<rect width="120" height="120" rx="26" fill="#1E4D5C"/><path d="M30 22h34l16 16v58a4 4 0 0 1-4 4H30a4 4 0 0 1-4-4V26a4 4 0 0 1 4-4z" fill="#fff"/><path d="M64 22v12a4 4 0 0 0 4 4h12z" fill="#9FD0C0"/><path d="M37 62h30M37 74h20" stroke="#1E4D5C" stroke-width="6" stroke-linecap="round" fill="none" opacity=".35"/><path d="M37 88l6 6 11-13" stroke="#1E4D5C" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path transform="translate(88 38) scale(22)" d="M0,-1 C0.1,-0.25 0.25,-0.1 1,0 C0.25,0.1 0.1,0.25 0,1 C-0.1,0.25 -0.25,0.1 -1,0 C-0.25,-0.1 -0.1,-0.25 0,-1Z" fill="#F5B73B"/><path transform="translate(100 66) scale(7)" d="M0,-1 C0.1,-0.25 0.25,-0.1 1,0 C0.25,0.1 0.1,0.25 0,1 C-0.1,0.25 -0.25,0.1 -1,0 C-0.25,-0.1 -0.1,-0.25 0,-1Z" fill="#F5B73B"/></svg>'
 )
+
+FAVICON = '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,' + __import__("urllib.parse").parse.quote('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><rect width="120" height="120" rx="26" fill="#1E4D5C"/><path d="M30 22h34l16 16v58a4 4 0 0 1-4 4H30a4 4 0 0 1-4-4V26a4 4 0 0 1 4-4z" fill="#fff"/><path d="M64 22v12a4 4 0 0 0 4 4h12z" fill="#9FD0C0"/><path d="M37 62h30M37 74h20" stroke="#1E4D5C" stroke-width="6" stroke-linecap="round" fill="none" opacity=".35"/><path d="M37 88l6 6 11-13" stroke="#1E4D5C" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path transform="translate(88 38) scale(22)" d="M0,-1 C0.1,-0.25 0.25,-0.1 1,0 C0.25,0.1 0.1,0.25 0,1 C-0.1,0.25 -0.25,0.1 -1,0 C-0.25,-0.1 -0.1,-0.25 0,-1Z" fill="#F5B73B"/><path transform="translate(100 66) scale(7)" d="M0,-1 C0.1,-0.25 0.25,-0.1 1,0 C0.25,0.1 0.1,0.25 0,1 C-0.1,0.25 -0.25,0.1 -1,0 C-0.25,-0.1 -0.1,-0.25 0,-1Z" fill="#F5B73B"/></svg>') + '">'
 
 BARRA = (
     '<header class="barra"><div class="barra-in">'
@@ -154,7 +155,7 @@ def pagina(titulo, cuerpo, barra=True, activa="", extra_head=""):
     return (
         '<!doctype html><html lang="es"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
-        f'<title>{titulo} - Agente Facturas</title>{FUENTES}{CSS}{extra_head}</head><body>'
+        f'<title>{titulo} - Agente Facturas</title>{FUENTES}{FAVICON}{CSS}{extra_head}</head><body>'
         + ("{% set activa = '" + activa + "' %}" + BARRA if barra else "")
         + cuerpo + "</body></html>"
     )
