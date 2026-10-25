@@ -1098,11 +1098,17 @@ def existe_email_gestoria(email):
         session.close()
 
 
+class GestoriaNoExiste(Exception):
+    """La sesión del navegador apunta a una gestoría que ya no está en la base de datos."""
+
+
 def obtener_estado_conexiones(tenant_id):
     """Qué tiene conectado la gestoría y si hay algún aviso que mostrar en el panel."""
     session = _obtener_session()
     try:
         g = session.get(Gestoria, tenant_id)
+        if g is None:
+            raise GestoriaNoExiste(tenant_id)
         provs = {c.proveedor: c.cuenta_conectada for c in session.query(CredencialAlmacenamiento).filter_by(tenant_id=tenant_id)}
         estado_correo = session.get(EstadoCorreo, tenant_id)
         return {

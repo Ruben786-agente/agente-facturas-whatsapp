@@ -23,6 +23,8 @@ from subida_web import bp_subida
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("servidor_principal")
 
+from basededatos import GestoriaNoExiste
+
 app = Flask(__name__)
 import seguridad
 seguridad.iniciar(app)
@@ -34,6 +36,14 @@ app.register_blueprint(bp_tareas)
 app.register_blueprint(bp_revision)
 app.register_blueprint(bp_publico)
 app.register_blueprint(bp_subida)
+
+
+@app.errorhandler(GestoriaNoExiste)
+def _sesion_huerfana(_error):
+    """Sesión de una gestoría que ya no existe (p. ej. tras cambiar de base de datos): se cierra y se pide entrar de nuevo."""
+    from flask import redirect, session, url_for
+    session.clear()
+    return redirect(url_for("panel.login"))
 
 
 @app.route("/webhook/stripe", methods=["POST"])
