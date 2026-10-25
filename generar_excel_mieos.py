@@ -73,14 +73,14 @@ def _procesa_una_factura(factura, cif_empresa):
     if factura.get("_motivo_revision"):   # el motivo concreto (p. ej. «las dos lecturas no coinciden en: total») va antes que el genérico
         return None, factura["_motivo_revision"]
     if factura.get("confianza") == "baja":
-        return None, "confianza baja del OCR/IA"
+        return None, "el agente no está seguro de haber leído bien algún dato (letra pequeña, borrosa o cortada)"
     tipo = _clasifica(factura, cif_empresa)
     if tipo is None:
-        return None, "CIF no coincide con emisor ni destinatario de esta empresa"
+        return None, "el CIF de la factura no es el de esta empresa (ni como emisor ni como destinatario)"
     if factura.get("_motivo_revision"):
         return None, factura["_motivo_revision"]
     if not _valida_cuadre(factura):
-        return None, "no cuadra Σ(base+cuota) con TOTAL FACTURA"
+        return None, "las bases y el IVA no suman el total de la factura"
     from validaciones import problemas_factura
     problemas = problemas_factura(factura)
     if problemas:
