@@ -426,7 +426,7 @@ def _precios_ia():
 
 @bp_publico.route("/admin/uso-ia")
 def uso_ia():
-    from basededatos import email_de_gestoria, obtener_comparacion, obtener_uso_ia
+    from basededatos import email_de_gestoria, obtener_comparacion, obtener_motivos_pendientes, obtener_uso_ia
     admin = os.environ.get("ADMIN_EMAIL", "").strip().lower()
     tenant = session.get("tenant_id")
     if not admin or not tenant or (email_de_gestoria(tenant) or "").lower() != admin:
@@ -445,6 +445,7 @@ def uso_ia():
     total_usd = sum(m["usd"] for m in resumen)
     total_llamadas = sum(m["llamadas"] for m in resumen)
     comparadas, coinciden = obtener_comparacion()
+    motivos = obtener_motivos_pendientes()
     plantilla = pagina("Consumo de la IA", """
 <main class="pagina" style="padding-top:40px;max-width:980px;">
   <h1 style="font-size:32px;">Consumo de la IA</h1>
@@ -463,6 +464,14 @@ def uso_ia():
   <p>Ha leído lo mismo (número, fecha, total y los dos CIF, y con lectura clara que cuadra) en <strong>{{ coinciden }} de {{ comparadas }}</strong> documentos ({{ "%.0f"|format(100 * coinciden / comparadas) }} %).</p>
   {% endif %}
 
+  <h2 style="font-size:20px;margin-top:26px;">Por qué hay documentos pendientes ahora</h2>
+  {% if motivos %}
+  <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+    <tr><th align="left">Motivo</th><th align="right">Documentos</th></tr>
+    {% for m, n in motivos %}<tr><td>{{ m }}</td><td align="right">{{ n }}</td></tr>{% endfor %}
+  </table>
+  {% else %}<p class="tenue">Ahora mismo no hay nada pendiente de revisar.</p>{% endif %}
+
   <h2 style="font-size:20px;margin-top:26px;">Por día</h2>
   <table style="width:100%;border-collapse:collapse;margin-top:8px;">
     <tr><th align="left">Día</th><th align="left">Modelo</th><th align="right">Llamadas</th><th align="right">Tokens entrada</th><th align="right">Tokens salida</th><th align="right">Coste (USD)</th></tr>
@@ -472,4 +481,4 @@ def uso_ia():
   <p class="tenue" style="margin-top:16px;">Precios usados (USD por millón de tokens, entrada / salida): {% for k, v in precios.items() %}{{ k }}: {{ v[0] }} / {{ v[1] }}{% if not loop.last %}; {% endif %}{% endfor %}. Confírmelos en la consola de Anthropic.</p>
 </main>""")
     return render_template_string(plantilla, filas=filas, resumen=resumen, total_usd=total_usd, total_llamadas=total_llamadas,
-                                  comparadas=comparadas, coinciden=coinciden, precios=precios)
+                                  comparadas=comparadas, coinciden=coinciden, precios=precios, motivos=motivos)

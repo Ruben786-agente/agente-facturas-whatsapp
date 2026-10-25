@@ -197,6 +197,10 @@ def procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=N
     factura = (extraer or extraer_factura)(contenido)
     if not factura.get("es_documento_fiscal", True):
         return {"accion": "ignorado"}
+    try:
+        factura = _corregir_con_conocidos(tenant_id, factura)
+    except Exception:
+        log.exception("No se pudo comparar el CIF con los datos conocidos")
     res = _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, factura, diferir_dudosas)
     if factura.get("_lectura_fallida"):
         res = {**res, "lectura_fallida": True}  # no se pudo leer: no debe darse por "visto"
@@ -226,6 +230,48 @@ def _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, fac
             "Lo que había dentro no se recupera solo: puede buscarlo en la papelera de su OneDrive o Google Drive.",
         )
         return _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir, forzar_revision)
+
+
+def _distancia(a, b):
+    """Número de cambios de carácter para pasar de a a b (para comparar un CIF mal leído con uno conocido)."""
+    anterior = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        actual = [i]
+        for j, cb in enumerate(b, 1):
+            actual.append(min(anterior[j] + 1, actual[j - 1] + 1, anterior[j - 1] + (ca != cb)))
+        anterior = actual
+    return anterior[-1]
+
+
+def _corregir_con_conocidos(tenant_id, factura):
+    """Un CIF que no pasa el dígito de control casi siempre es un dígito mal leído. Si se parece mucho al de un proveedor ya aceptado
+    (y el nombre coincide), o al de una empresa cliente de la gestoría, se corrige. Solo si hay una única candidata."""
+    from basededatos import listar_empresas_activas, proveedores_conocidos
+    from validaciones import control_nif_cif_correcto
+    if factura.get("_lectura_fallida"):
+        return factura
+    cambios = {}
+    emisor = factura.get("emisor") or {}
+    cif = _normaliza_cif(emisor.get("cif_nif"))
+    if cif and control_nif_cif_correcto(cif) is False:
+        palabras = _palabras(emisor.get("nombre"))
+        candidatos = {_normaliza_cif(k["cif_nif"]) for k in proveedores_conocidos(tenant_id)
+                      if control_nif_cif_correcto(_normaliza_cif(k["cif_nif"])) is not False
+                      and _distancia(cif, _normaliza_cif(k["cif_nif"])) <= 3
+                      and len(palabras) >= 1 and palabras & _palabras(k["nombre"])}
+        if len(candidatos) == 1:
+            cambios["emisor"] = {**emisor, "cif_nif": next(iter(candidatos))}
+    destinatario = factura.get("destinatario") or {}
+    cif = _normaliza_cif(destinatario.get("cif_nif"))
+    if cif and control_nif_cif_correcto(cif) is False:
+        candidatos = {_normaliza_cif(e["cif_nif"]) for e in listar_empresas_activas(tenant_id)
+                      if _distancia(cif, _normaliza_cif(e["cif_nif"])) <= 2}
+        if len(candidatos) == 1:
+            cambios["destinatario"] = {**destinatario, "cif_nif": next(iter(candidatos))}
+    if cambios:
+        log.info("CIF corregido con los datos que ya conoce la gestoría: %s", list(cambios))
+        return {**factura, **cambios, "relectura": factura.get("relectura") or "cif_conocido"}
+    return factura
 
 
 def _palabras(texto):
@@ -261,13 +307,15 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
     destinatario = factura.get("destinatario") or {}
     cif = _normaliza_cif(destinatario.get("cif_nif"))
 
-    if (not cif or not _cif_valido(cif)) and not es_ticket(factura) and not factura.get("_lectura_fallida") \
+    ticket_de_verdad = factura.get("es_factura_simplificada") or factura.get("formato_ticket_tpv")
+    if (not cif or not _cif_valido(cif)) and not ticket_de_verdad and not factura.get("_lectura_fallida") \
             and (factura.get("num_factura") or factura.get("total_factura")):
         # CIF del comprador cortado o ilegible: si el nombre (o el principio del CIF) encaja con una sola empresa conocida, se
         # asigna a ella, pero siempre a Revisión para que la gestoría lo confirme.
         empresa_pista = _empresa_por_pistas(tenant_id, destinatario)
         if empresa_pista:
-            factura = {**factura, "destinatario": {**destinatario, "cif_nif": empresa_pista["cif_nif"]}}
+            factura = {**factura, "sin_cif_destinatario": False,
+                       "destinatario": {**destinatario, "cif_nif": empresa_pista["cif_nif"]}}
             return _archivar(storage, tenant_id, contenido, nombre_original, factura, False,
                              forzar_revision or "el CIF del comprador no se leyó entero; asignada a "
                              f"{empresa_pista['nombre']} por el nombre")
@@ -402,7 +450,8 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
         if razon == "sin_cif":
             if len(empresas_del_lote) == 1:
                 cif_lote = next(iter(empresas_del_lote))
-                factura = {**factura, "destinatario": {**(factura.get("destinatario") or {}), "cif_nif": cif_lote}}
+                factura = {**factura, "sin_cif_destinatario": False,
+                           "destinatario": {**(factura.get("destinatario") or {}), "cif_nif": cif_lote}}
                 forzar = "no se leyó el CIF del comprador; asignada a la empresa del resto del lote"
         try:
             resultados[posicion] = _archivar_con_reparacion(storage, tenant_id, parte, nombre_parte, factura,

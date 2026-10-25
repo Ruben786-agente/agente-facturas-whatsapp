@@ -325,7 +325,29 @@ def _debe_verificarse(resultado: dict) -> bool:
         and not resultado.get("_lectura_fallida")
 
 
+MODELO_ESCALADO = os.environ.get("MODELO_ESCALADO", "").strip()
+
+
+def _sigue_dudosa(r: dict) -> bool:
+    if r.get("_lectura_fallida") or r.get("es_documento_fiscal") is False:
+        return False
+    from validaciones import problemas_factura
+    return r.get("confianza") == "baja" or bool(problemas_factura(r)) or not _cuadra(r)
+
+
 def extraer_factura(contenido: bytes) -> dict:
+    """Lectura normal y, si MODELO_ESCALADO está definido y la factura sigue dudosa, una última lectura con ese modelo (más potente)."""
+    resultado = _extraer_factura_base(contenido)
+    if MODELO_ESCALADO and _sigue_dudosa(resultado):
+        otra = _leer(contenido, MODELO_ESCALADO)
+        if not otra.get("_lectura_fallida") and otra.get("es_documento_fiscal") is not False and not _sigue_dudosa(otra):
+            log.info("Lectura de refuerzo con %s: resuelve la duda", MODELO_ESCALADO)
+            return {**otra, "relectura": "modelo_superior"}
+        log.info("Lectura de refuerzo con %s: sigue dudosa", MODELO_ESCALADO)
+    return resultado
+
+
+def _extraer_factura_base(contenido: bytes) -> dict:
     """
     Sin variables: lectura con el modelo principal (repetida si sale dudosa) y, después, las comprobaciones de validaciones.py.
     MODELO_EXTRACCION_RAPIDA: primera lectura con el modelo barato; si es clara y cuadra se acepta; si no, se lee con el principal.

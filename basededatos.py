@@ -1296,6 +1296,34 @@ def registrar_comparacion(coincide):
             session.close()
 
 
+def proveedores_conocidos(tenant_id):
+    """Proveedores (CIF y nombre) de facturas ya aceptadas de esta gestoría, para corregir un CIF mal leído."""
+    session = _obtener_session()
+    try:
+        filas = (session.query(FacturaCache.proveedor_cif, FacturaCache.proveedor_nombre)
+                 .filter(FacturaCache.tenant_id == tenant_id, FacturaCache.destino == "PROCESADA",
+                         FacturaCache.proveedor_cif.isnot(None)).distinct().all())
+        return [{"cif_nif": c, "nombre": n or ""} for c, n in filas if c]
+    finally:
+        session.close()
+
+
+def obtener_motivos_pendientes():
+    """Cuántos documentos hay ahora en Revisión o Sin identificar por cada motivo (todas las gestorías, para el titular)."""
+    import re
+    session = _obtener_session()
+    try:
+        motivos = [m for (m,) in session.query(FacturaCache.motivo).filter(FacturaCache.destino == "REVISION").all()]
+        motivos += [m for (m,) in session.query(DocumentoSinIdentificar.motivo).all()]
+        cuenta = {}
+        for m in motivos:
+            clave = re.sub(r"\s*\([^)]*\)", "", m or "(sin motivo)").strip()
+            cuenta[clave] = cuenta.get(clave, 0) + 1
+        return sorted(cuenta.items(), key=lambda x: x[1], reverse=True)
+    finally:
+        session.close()
+
+
 def obtener_comparacion():
     """(comparadas, coinciden) acumulado de todos los días."""
     session = _obtener_session()
