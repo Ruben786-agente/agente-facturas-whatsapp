@@ -243,7 +243,9 @@ def _obtener_session():
         # Solo se guarda el resultado si TODO ha ido bien; si la base de datos
         # estaba caída o pausada, la siguiente petición vuelve a intentarlo.
         url = os.environ.get("DATABASE_URL", "sqlite:///local_prueba.db")
-        motor = create_engine(url, pool_pre_ping=True, hide_parameters=True)
+        # Sin comprobación previa en cada uso (duplicaba los viajes a la base de datos y hacía lento el panel);
+        # en su lugar, las conexiones se renuevan solas cada 4 minutos, antes de que Supabase las cierre por inactividad.
+        motor = create_engine(url, pool_pre_ping=False, pool_recycle=240, pool_size=5, max_overflow=5, hide_parameters=True)
         Base.metadata.create_all(motor)
         _cerrar_api_publica(motor)
         _engine = motor

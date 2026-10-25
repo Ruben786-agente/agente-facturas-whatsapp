@@ -126,13 +126,10 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
           <a class="btn principal" href="{{ url_for('alta.conectar_gdrive') }}">Conectar Google Drive</a>
         {% endif %}
       </div>
-      {% if entrada_activa %}
-      <p class="tenue" style="margin-top:12px;">¿Tiene facturas escaneadas o fotos? Déjelas, sueltas o en carpetas, en <strong>Agente Facturas / Entrada</strong> de su OneDrive y el agente las lee y las archiva solo, igual que las del correo.
-        <a href="{{ url_for('alta.abrir_entrada') }}" target="_blank" rel="noopener">Abrir la carpeta Entrada</a>
-        También puede usar <a href="{{ url_for('subida.subir') }}">Subir facturas</a> desde el panel.</p>
-      {% elif e.almacenamiento == "gdrive" %}
+      {% if e.almacenamiento %}
       <p class="tenue" style="margin-top:12px;">¿Tiene facturas escaneadas o fotos? Súbalas desde <a href="{{ url_for('subida.subir') }}">Subir facturas</a> y el agente las lee y las archiva solo, igual que las del correo.
-        <a href="{{ url_for('alta.abrir_entrada') }}" target="_blank" rel="noopener">Ver la carpeta en Google Drive</a></p>
+        {% if entrada_activa %}También puede dejarlas, sueltas o en carpetas, en <strong>Agente Facturas / Entrada</strong> de su OneDrive.{% endif %}
+        <a href="{{ url_for('alta.abrir_entrada') }}" target="_blank" rel="noopener">Abrir la carpeta Entrada</a></p>
       {% endif %}
     </section>
 
