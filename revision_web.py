@@ -112,6 +112,15 @@ CSS_CORREGIR = """
   .desglose-envoltorio { overflow-x: auto; }
   .desglose-envoltorio .desglose { min-width: 560px; }
   .pie-formulario { display: flex; gap: 12px; align-items: center; margin-top: 22px; flex-wrap: wrap; }
+  .otra-via { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--linea); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .otra-via p { margin: 0; flex: 1 1 260px; }
+  .trabajando { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+    background: rgba(255,255,255,.92); text-align: center; padding: 24px; }
+  .trabajando.activo { display: flex; }
+  .trabajando .rueda { width: 44px; height: 44px; border-radius: 50%; border: 4px solid var(--linea); border-top-color: var(--marca); animation: gira 0.9s linear infinite; }
+  .trabajando strong { font-size: 20px; }
+  @keyframes gira { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .trabajando .rueda { animation: none; } }
 </style>
 """
 
@@ -146,12 +155,37 @@ PLANTILLA_CORREGIR = pagina("Corregir factura", """
     </table></div>
     <div class="pie-formulario">
       <button class="btn principal grande" type="submit" name="accion" value="anadir">Añadir al Excel</button>
-      <button class="btn" type="submit" name="accion" value="gestionada" formnovalidate
-        onclick="return confirm('¿Marcar como gestionada? Ya no aparecerá en el panel y no se añadirá al Excel desde aquí.');">Ya la he gestionado yo: marcar como gestionada</button>
       <a class="btn" href="{{ url_for('revision.abrir_revision', factura_id=factura_id) }}" target="_blank" rel="noopener">Ver el original</a>
+    </div>
+    <div class="otra-via">
+      <p class="tenue">¿Ya la ha gestionado por otra vía? Puede retirarla de la lista sin añadirla al Excel.</p>
+      <button class="btn discreto" type="submit" name="accion" value="gestionada" formnovalidate
+        onclick="return confirm('¿Marcar como gestionada? Ya no aparecerá en el panel y no se añadirá al Excel desde aquí.');">Marcar como gestionada</button>
     </div>
   </form>
 </main>
+<div class="trabajando" id="trabajando" role="alert" aria-live="assertive">
+  <div class="rueda" aria-hidden="true"></div>
+  <strong id="trabajando-texto">Añadiendo al Excel…</strong>
+  <span class="tenue">Puede tardar unos segundos. No cierre ni recargue esta página.</span>
+</div>
+<script>
+(function () {
+  var f = document.querySelector("form.formulario"), enviado = false;
+  f.addEventListener("submit", function (e) {
+    if (enviado) { e.preventDefault(); return; }
+    enviado = true;
+    var b = e.submitter, h = document.createElement("input");
+    h.type = "hidden"; h.name = "accion"; h.value = b ? b.value : "anadir"; f.appendChild(h);
+    document.getElementById("trabajando-texto").textContent = (h.value === "gestionada") ? "Guardando…" : "Añadiendo al Excel…";
+    document.getElementById("trabajando").classList.add("activo");
+    setTimeout(function () { f.querySelectorAll("button").forEach(function (x) { x.disabled = true; }); }, 0);
+  });
+  window.addEventListener("pageshow", function (ev) {  // al volver atrás con el navegador, se vuelve a poder usar
+    if (ev.persisted) { enviado = false; document.getElementById("trabajando").classList.remove("activo"); f.querySelectorAll("button").forEach(function (x) { x.disabled = false; }); }
+  });
+})();
+</script>
 """, extra_head=CSS_CORREGIR)
 
 
