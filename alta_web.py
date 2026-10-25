@@ -131,7 +131,8 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
         <a href="{{ url_for('alta.abrir_entrada') }}" target="_blank" rel="noopener">Abrir la carpeta Entrada</a>
         También puede usar <a href="{{ url_for('subida.subir') }}">Subir facturas</a> desde el panel.</p>
       {% elif e.almacenamiento == "gdrive" %}
-      <p class="tenue" style="margin-top:12px;">¿Tiene facturas escaneadas o fotos? Súbalas desde <a href="{{ url_for('subida.subir') }}">Subir facturas</a> y el agente las lee y las archiva solo, igual que las del correo.</p>
+      <p class="tenue" style="margin-top:12px;">¿Tiene facturas escaneadas o fotos? Súbalas desde <a href="{{ url_for('subida.subir') }}">Subir facturas</a> y el agente las lee y las archiva solo, igual que las del correo.
+        <a href="{{ url_for('alta.abrir_entrada') }}" target="_blank" rel="noopener">Ver la carpeta en Google Drive</a></p>
       {% endif %}
     </section>
 
@@ -248,15 +249,28 @@ def abrir_entrada():
     tenant_id = session["tenant_id"]
     try:
         proveedor = proveedor_almacenamiento(tenant_id)
-        if proveedor != "onedrive":
-            return redirect(url_for("alta.conexiones", error="Con Google Drive use «Subir facturas» en el panel."))
         storage = storage_para_tenant(tenant_id)
         enlace = storage.obtener_enlace(asegurar_carpetas(storage, tenant_id, proveedor, comprobar=True)["entrada"])
         if enlace.startswith("https://"):
-            return redirect(enlace)
+            from sondeo_entrada import CARPETA_RAIZ, NOMBRE_ENTRADA
+            log.info("Entrada de %s: enlace hacia %s", tenant_id, urlparse(enlace).netloc)
+            return render_template_string(PLANTILLA_ENTRADA, enlace=enlace, ruta=f"{CARPETA_RAIZ} › {NOMBRE_ENTRADA}", soltar=(proveedor == "onedrive"))
     except Exception:
         log.exception("No se pudo abrir la carpeta Entrada de %s", tenant_id)
     return redirect(url_for("alta.conexiones", error="No hemos podido abrir la carpeta Entrada. Inténtelo de nuevo en un momento."))
+
+
+PLANTILLA_ENTRADA = pagina("Carpeta Entrada", """
+<main class="pagina" style="max-width:640px;">
+  <h1>Su carpeta Entrada</h1>
+  <p class="que">Está en su almacenamiento, dentro de <strong>{{ ruta }}</strong>.
+  {% if soltar %}Los archivos que deje ahí los lee el agente.{% else %}Con Google Drive, para que el agente lea facturas use <a href="{{ url_for('subida.subir') }}">Subir facturas</a>: los archivos soltados a mano en esa carpeta no los ve.{% endif %}</p>
+  <p><a class="btn principal" href="{{ enlace }}" target="_blank" rel="noopener">Abrir la carpeta</a>
+     <a class="btn" href="{{ url_for('alta.conexiones') }}">Volver</a></p>
+  <p class="tenue">Si no se abre, copie esta dirección en el navegador o busque la carpeta a mano en su OneDrive:</p>
+  <p class="tenue" style="word-break:break-all;">{{ enlace }}</p>
+</main>
+""", activa="conexiones")
 
 
 @bp_alta.route("/permiso-administrador")
