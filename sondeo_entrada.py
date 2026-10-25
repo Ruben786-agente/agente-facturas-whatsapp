@@ -48,9 +48,18 @@ def _proveedores_activos():
     return {p.strip() for p in os.environ.get("ENTRADA_PROVEEDORES", "onedrive,gdrive").split(",") if p.strip()}
 
 
-def asegurar_carpetas(storage, tenant_id, proveedor):
-    """Devuelve los ids de las carpetas de entrada, creándolas si hace falta. Repetirlo no duplica nada."""
+def asegurar_carpetas(storage, tenant_id, proveedor, comprobar=False):
+    """Devuelve los ids de las carpetas de entrada, creándolas si hace falta. Repetirlo no duplica nada.
+    Con comprobar=True se verifica que «Entrada» siga existiendo; si la gestoría la borró, se vuelve a crear."""
     carpetas = obtener_carpetas_entrada(tenant_id, proveedor)
+    if carpetas and comprobar:
+        try:
+            storage.obtener_enlace(carpetas["entrada"])
+        except requests.HTTPError as e:
+            if getattr(e.response, "status_code", None) not in (404, 410):
+                raise
+            olvidar_carpetas_entrada(tenant_id)
+            carpetas = None
     if carpetas:
         return carpetas
     raiz = storage.crear_carpeta("root", CARPETA_RAIZ)

@@ -251,7 +251,7 @@ def abrir_entrada():
         if proveedor != "onedrive":
             return redirect(url_for("alta.conexiones", error="Con Google Drive use «Subir facturas» en el panel."))
         storage = storage_para_tenant(tenant_id)
-        enlace = storage.obtener_enlace(asegurar_carpetas(storage, tenant_id, proveedor)["entrada"])
+        enlace = storage.obtener_enlace(asegurar_carpetas(storage, tenant_id, proveedor, comprobar=True)["entrada"])
         if enlace.startswith("https://"):
             return redirect(enlace)
     except Exception:

@@ -154,7 +154,7 @@ def subir_archivo():
         storage = storage_para_tenant(tenant_id)
         if storage is None:
             return jsonify(ok=False, mensaje="Conecte primero su almacenamiento"), 400
-        carpetas = asegurar_carpetas(storage, tenant_id, proveedor)
+        carpetas = asegurar_carpetas(storage, tenant_id, proveedor, comprobar=True)
         storage.subir_archivo(carpetas["entrada"], _nombre_seguro(archivo.filename), contenido)
     except (ErrorAutorizacionGoogle, ErrorAutorizacionMicrosoft):
         return jsonify(ok=False, mensaje="Vuelva a conectar su almacenamiento en Conexiones"), 409
