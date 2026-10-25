@@ -156,16 +156,16 @@ PLANTILLA_PANEL = pagina("Panel", """
           {% if p.destino == "REVISION" %}
             {% if p.corregible %}<a class="btn principal" href="{{ url_for('revision.corregir', factura_id=p.id) }}">Corregir y añadir al Excel</a>{% endif %}
             <a class="btn" href="{{ url_for('revision.abrir_revision', factura_id=p.id) }}" target="_blank" rel="noopener">Abrir carpeta</a>
-            <form class="en-linea" method="post" action="{{ url_for('revision.revisada', factura_id=p.id) }}"><button class="btn" type="submit">Marcar como revisada</button></form>
+            <form class="en-linea aparte" method="post" action="{{ url_for('revision.revisada', factura_id=p.id) }}"><button class="btn discreto" type="submit" onclick="return confirm('¿Marcar como gestionada? Desaparecerá de esta lista y no se añadirá al Excel.');">Marcar como gestionada</button></form>
           {% else %}
             <a class="btn" href="{{ url_for('revision.abrir_sin_identificar') }}" target="_blank" rel="noopener">Abrir carpeta</a>
-            <form class="en-linea" method="post" action="{{ url_for('revision.sin_identificar_revisado', documento_id=p.id) }}"><button class="btn" type="submit">Marcar como revisado</button></form>
+            <form class="en-linea aparte" method="post" action="{{ url_for('revision.sin_identificar_revisado', documento_id=p.id) }}"><button class="btn discreto" type="submit" onclick="return confirm('¿Marcar como gestionado? Desaparecerá de esta lista.');">Marcar como gestionado</button></form>
           {% endif %}
         </div></td>
       </tr>
       {% endfor %}
     </table></div>
-    <p class="nota">«Marcar como revisada» quita la línea de esta lista cuando ya la ha gestionado por su cuenta. «Corregir y añadir al Excel» le deja arreglar los datos y la anota en el Excel del trimestre.</p>
+    <p class="nota">«Marcar como gestionada» quita la línea de esta lista, sin añadirla al Excel, cuando ya la ha resuelto por su cuenta. «Corregir y añadir al Excel» le deja arreglar los datos y la anota en el Excel del trimestre.</p>
     {% else %}
     <div class="vacio"><strong>No hay nada pendiente.</strong>Si una factura necesita su revisión, aparecerá aquí.</div>
     {% endif %}

@@ -67,6 +67,7 @@ CSS = """
   .btn.discreto { border-color: transparent; background: transparent; color: var(--tinta-2); }
   .btn.discreto:hover { background: var(--papel); }
   form.en-linea { display: inline; }
+  form.en-linea.aparte { display: block; flex-basis: 100%; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--linea); }
 
   /* Mensajes */
   .mensaje, .alerta { padding: 12px 16px; border-radius: 8px; margin-bottom: 14px; border: 1px solid var(--linea); border-left-width: 4px; background: var(--superficie); }
