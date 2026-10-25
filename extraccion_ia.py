@@ -263,6 +263,36 @@ def _fiable(datos: dict) -> bool:
     return _cuadra(datos) and not problemas_factura(datos)
 
 
+MAX_RELECTURAS_CIF = 2
+
+
+def _cif_con_error(datos: dict) -> bool:
+    """Algún CIF/NIF de la lectura no pasa el dígito de control (casi siempre, un dígito mal leído)."""
+    from validaciones import control_nif_cif_correcto
+    return any(control_nif_cif_correcto((datos.get(k) or {}).get("cif_nif")) is False for k in ("emisor", "destinatario"))
+
+
+def _corregir_cif_releyendo(contenido: bytes, primera: dict) -> dict:
+    """Si un CIF sale con el dígito de control mal, se vuelve a leer (hasta 2 veces). Se acepta la nueva lectura solo si sus CIF ya
+    son válidos y coincide con la primera en número, fecha y total, o sea, solo cambia lo que estaba mal leído."""
+    if primera.get("_lectura_fallida") or not _cif_con_error(primera):
+        return primera
+    for _ in range(MAX_RELECTURAS_CIF):
+        otra = _leer(contenido)
+        if otra.get("_lectura_fallida") or otra.get("es_documento_fiscal") is False or _cif_con_error(otra):
+            continue
+        try:
+            igual = ((otra.get("num_factura") or "").strip().upper() == (primera.get("num_factura") or "").strip().upper()
+                     and (otra.get("fecha_factura") or "").strip() == (primera.get("fecha_factura") or "").strip()
+                     and abs(float(otra.get("total_factura") or 0) - float(primera.get("total_factura") or 0)) <= 0.01)
+        except (TypeError, ValueError):
+            igual = False
+        if igual:
+            log.info("Relectura por CIF con dígito de control incorrecto: corregido")
+            return {**otra, "relectura": "cif_corregido"}
+    return primera
+
+
 def _extraer_con_modelo_principal(contenido: bytes) -> dict:
     """
     Lee el documento con MODELO. Si sale con confianza 'baja' se lee una segunda vez; si la segunda ya no sale 'baja' y coincide con la
@@ -270,7 +300,10 @@ def _extraer_con_modelo_principal(contenido: bytes) -> dict:
     mismo). Si no, se queda como estaba: 'baja' y a Revisión.
     """
     primera = _leer(contenido)
-    if primera.get("es_documento_fiscal") is False or primera.get("confianza") != "baja":
+    if primera.get("es_documento_fiscal") is False:
+        return primera
+    primera = _corregir_cif_releyendo(contenido, primera)
+    if primera.get("confianza") != "baja":
         return primera
 
     segunda = _leer(contenido)
