@@ -228,10 +228,49 @@ def _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, fac
         return _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir, forzar_revision)
 
 
+def _palabras(texto):
+    import re
+    import unicodedata
+    t = unicodedata.normalize("NFD", texto or "").encode("ascii", "ignore").decode().upper()
+    return {p for p in re.findall(r"[A-Z0-9]+", t) if len(p) >= 3 and p not in {"SOCIEDAD", "LIMITADA", "SLU", "SAU"}}
+
+
+def _empresa_por_pistas(tenant_id, destinatario):
+    """El CIF del comprador falta o está cortado/ilegible, pero el nombre (o el principio del CIF) coincide con UNA sola empresa
+    ya dada de alta de la gestoría: se devuelve esa empresa. Si hay dudas (ninguna o varias), None."""
+    from basededatos import listar_empresas_activas
+    destinatario = destinatario or {}
+    parcial = _normaliza_cif(destinatario.get("cif_nif"))
+    palabras = _palabras(destinatario.get("nombre"))
+    candidatas = []
+    for e in listar_empresas_activas(tenant_id):
+        cif_e = _normaliza_cif(e["cif_nif"])
+        por_cif = len(parcial) >= 5 and cif_e.startswith(parcial)
+        otras = _palabras(e["nombre"])
+        menor, mayor = (palabras, otras) if len(palabras) <= len(otras) else (otras, palabras)
+        por_nombre = len(menor) >= 2 and menor <= mayor
+        if por_cif or por_nombre:
+            candidatas.append(e)
+    if len(candidatas) != 1:
+        return None
+    return resolver_empresa_cliente_por_cif(tenant_id, [_normaliza_cif(candidatas[0]["cif_nif"])])
+
+
 def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=False, forzar_revision=None):
     nombre = _nombre_unico(nombre_original, factura, contenido)
     destinatario = factura.get("destinatario") or {}
     cif = _normaliza_cif(destinatario.get("cif_nif"))
+
+    if (not cif or not _cif_valido(cif)) and not es_ticket(factura) and not factura.get("_lectura_fallida") \
+            and (factura.get("num_factura") or factura.get("total_factura")):
+        # CIF del comprador cortado o ilegible: si el nombre (o el principio del CIF) encaja con una sola empresa conocida, se
+        # asigna a ella, pero siempre a Revisión para que la gestoría lo confirme.
+        empresa_pista = _empresa_por_pistas(tenant_id, destinatario)
+        if empresa_pista:
+            factura = {**factura, "destinatario": {**destinatario, "cif_nif": empresa_pista["cif_nif"]}}
+            return _archivar(storage, tenant_id, contenido, nombre_original, factura, False,
+                             forzar_revision or "el CIF del comprador no se leyó entero; asignada a "
+                             f"{empresa_pista['nombre']} por el nombre")
 
     if not cif:
         if diferir and not es_ticket(factura):
