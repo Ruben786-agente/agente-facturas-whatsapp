@@ -237,12 +237,32 @@ def _cerrar_api_publica(motor):
         log.exception("No se pudo activar la seguridad por filas en las tablas")
 
 
+def _normalizar_url(url):
+    """Arregla los fallos típicos al pegar la dirección de Supabase: espacios o comillas, «postgres://»,
+    corchetes alrededor de la contraseña y caracteres especiales (@, #, /, ?) dentro de la contraseña."""
+    from urllib.parse import quote, unquote
+    url = (url or "").strip().strip("'\"").strip()
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    if not url.startswith("postgresql://") or "@" not in url:
+        return url
+    resto = url[len("postgresql://"):]
+    credenciales, _, destino = resto.rpartition("@")
+    usuario, dos_puntos, clave = credenciales.partition(":")
+    if dos_puntos:
+        if clave.startswith("[") and clave.endswith("]"):
+            clave = clave[1:-1]
+        clave = quote(unquote(clave), safe="")
+        credenciales = f"{usuario}:{clave}"
+    return f"postgresql://{credenciales}@{destino}"
+
+
 def _obtener_session():
     global _engine, _Session
     if _Session is None:
         # Solo se guarda el resultado si TODO ha ido bien; si la base de datos
         # estaba caída o pausada, la siguiente petición vuelve a intentarlo.
-        url = os.environ.get("DATABASE_URL", "sqlite:///local_prueba.db")
+        url = _normalizar_url(os.environ.get("DATABASE_URL", "sqlite:///local_prueba.db"))
         # Sin comprobación previa en cada uso (duplicaba los viajes a la base de datos y hacía lento el panel);
         # en su lugar, las conexiones se renuevan solas cada 4 minutos, antes de que Supabase las cierre por inactividad.
         motor = create_engine(url, pool_pre_ping=False, pool_recycle=240, pool_size=5, max_overflow=5, hide_parameters=True)
