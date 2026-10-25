@@ -251,7 +251,9 @@ def abrir_entrada():
         if enlace.startswith("https://"):
             from sondeo_entrada import CARPETA_RAIZ, NOMBRE_ENTRADA
             log.info("Entrada de %s: enlace hacia %s", tenant_id, urlparse(enlace).netloc)
-            return render_template_string(PLANTILLA_ENTRADA, enlace=enlace, ruta=f"{CARPETA_RAIZ} › {NOMBRE_ENTRADA}", soltar=(proveedor == "onedrive"))
+            estado = obtener_estado_conexiones(tenant_id)
+            cuenta = estado.get("onedrive_cuenta") if proveedor == "onedrive" else estado.get("gdrive_cuenta")
+            return render_template_string(PLANTILLA_ENTRADA, enlace=enlace, ruta=f"{CARPETA_RAIZ} › {NOMBRE_ENTRADA}", soltar=(proveedor == "onedrive"), cuenta=cuenta)
     except Exception:
         log.exception("No se pudo abrir la carpeta Entrada de %s", tenant_id)
     return redirect(url_for("alta.conexiones", error="No hemos podido abrir la carpeta Entrada. Inténtelo de nuevo en un momento."))
@@ -262,6 +264,7 @@ PLANTILLA_ENTRADA = pagina("Carpeta Entrada", """
   <h1>Su carpeta Entrada</h1>
   <p class="que">Está en su almacenamiento, dentro de <strong>{{ ruta }}</strong>.
   {% if soltar %}Los archivos que deje ahí los lee el agente.{% else %}Con Google Drive, para que el agente lea facturas use <a href="{{ url_for('subida.subir') }}">Subir facturas</a>: los archivos soltados a mano en esa carpeta no los ve.{% endif %}</p>
+  {% if cuenta %}<p class="alerta">Esta carpeta pertenece a la cuenta <strong>{{ cuenta }}</strong>. Para abrirla, su navegador debe tener iniciada la sesión con <strong>esa</strong> cuenta; si tiene otra abierta (por ejemplo, la de trabajo), no cargará. Pruebe en una ventana de incógnito.</p>{% endif %}
   <p><a class="btn principal" href="{{ enlace }}" target="_blank" rel="noopener">Abrir la carpeta</a>
      <a class="btn" href="{{ url_for('alta.conexiones') }}">Volver</a></p>
   <p class="tenue">Si no se abre, copie esta dirección en el navegador o busque la carpeta a mano en su OneDrive:</p>
