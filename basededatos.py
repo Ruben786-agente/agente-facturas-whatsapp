@@ -35,6 +35,7 @@ class Gestoria(Base):
     stripe_customer_id = Column(String)
     stripe_subscription_id = Column(String)
     carpeta_sin_identificar_id = Column(String)
+    periodicidad = Column(String, nullable=False, default="mensual", server_default="mensual")  # del Excel: mensual | trimestral
     activa = Column(Boolean, nullable=False, default=True)
     creada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -237,6 +238,18 @@ def _cerrar_api_publica(motor):
         log.exception("No se pudo activar la seguridad por filas en las tablas")
 
 
+def _anadir_columnas_nuevas(motor):
+    """create_all no añade columnas a tablas que ya existen: las que han ido apareciendo se añaden aquí."""
+    from sqlalchemy import inspect, text
+    try:
+        columnas = {c["name"] for c in inspect(motor).get_columns("gestorias")}
+        if "periodicidad" not in columnas:
+            with motor.begin() as conexion:
+                conexion.execute(text("ALTER TABLE gestorias ADD COLUMN periodicidad VARCHAR NOT NULL DEFAULT 'mensual'"))
+    except Exception:
+        log.exception("No se pudo añadir la columna periodicidad a las gestorías")
+
+
 def _normalizar_url(url):
     """Arregla los fallos típicos al pegar la dirección de Supabase: espacios o comillas, «postgres://»,
     corchetes alrededor de la contraseña y caracteres especiales (@, #, /, ?) dentro de la contraseña."""
@@ -267,6 +280,7 @@ def _obtener_session():
         # en su lugar, las conexiones se renuevan solas cada 4 minutos, antes de que Supabase las cierre por inactividad.
         motor = create_engine(url, pool_pre_ping=False, pool_recycle=240, pool_size=5, max_overflow=5, hide_parameters=True)
         Base.metadata.create_all(motor)
+        _anadir_columnas_nuevas(motor)
         _cerrar_api_publica(motor)
         _engine = motor
         _Session = sessionmaker(bind=motor)
@@ -921,17 +935,56 @@ def _trimestre_en_plazo(hoy):
 MINUTOS_POR_DOCUMENTO = 3  # tiempo que se estima que ahorra cada factura leída y archivada
 
 
+def obtener_periodicidad(tenant_id):
+    """'mensual' o 'trimestral': cada cuánto saca el Excel esta gestoría."""
+    from periodo_fiscal import PERIODICIDADES, PERIODICIDAD_POR_DEFECTO
+    session = _obtener_session()
+    try:
+        g = session.query(Gestoria).filter_by(tenant_id=tenant_id).first()
+        valor = getattr(g, "periodicidad", None) if g else None
+        return valor if valor in PERIODICIDADES else PERIODICIDAD_POR_DEFECTO
+    finally:
+        session.close()
+
+
+def guardar_periodicidad(tenant_id, periodicidad):
+    from periodo_fiscal import PERIODICIDADES
+    if periodicidad not in PERIODICIDADES:
+        return False
+    session = _obtener_session()
+    try:
+        g = session.query(Gestoria).filter_by(tenant_id=tenant_id).first()
+        if not g:
+            return False
+        g.periodicidad = periodicidad
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def _mes_en_foco(hoy):
+    """Mes del que se está haciendo el cierre: los primeros días del mes siguen siendo del mes anterior."""
+    if hoy.day <= 10:
+        return (hoy.year - 1, 12) if hoy.month == 1 else (hoy.year, hoy.month - 1)
+    return (hoy.year, hoy.month)
+
+
 def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
     """
     Para el panel de la gestoría:
       - resumen: cuántos documentos hay en cada estado (de todo el histórico),
-      - clientes: una fila por empresa cliente y trimestre (facturas, total, tickets, revisión),
+      - clientes: una fila por empresa cliente y periodo (mes o trimestre, según la gestoría),
       - atencion: lo que la gestoría tiene que mirar (Revisión y Sin identificar),
-      - plazo: cuenta atrás del modelo 303 y cuántos clientes tienen algo sin revisar en ese trimestre,
+      - plazo: (solo gestorías trimestrales) cuenta atrás del modelo 303 y clientes con algo sin revisar,
+      - cierre: (solo gestorías mensuales) cómo va el cierre del mes en curso,
       - ahorro: documentos gestionados este mes y tiempo estimado ahorrado.
-    'trimestre' (p. ej. "2024-1") filtra las filas de clientes.
+    'trimestre' es el filtro de periodo elegido (p. ej. "2026-10" en mensual o "2024-T1" en trimestral).
     """
     from datetime import date
+    from periodo_fiscal import MESES
+    periodicidad = obtener_periodicidad(tenant_id)
+    mensual = periodicidad == "mensual"
     session = _obtener_session()
     try:
         filas = (
@@ -951,9 +1004,14 @@ def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
                 momento = _como_aware_utc(f.procesada_en) if f.procesada_en else None
                 if momento and (momento.year, momento.month) == (hoy.year, hoy.month):
                     docs_mes += 1
-            clave = (cif, f.fecha_factura.year, (f.fecha_factura.month - 1) // 3 + 1)
+            anio, mes = f.fecha_factura.year, f.fecha_factura.month
+            sub = mes if mensual else (mes - 1) // 3 + 1
+            clave = (cif, anio, sub)
             g = grupos.setdefault(clave, {
-                "empresa": nombre_empresa, "cif": cif, "anio": clave[1], "trimestre": clave[2],
+                "empresa": nombre_empresa, "cif": cif, "anio": anio, "sub": sub,
+                "clave": f"{anio}-{sub:02d}" if mensual else f"{anio}-T{sub}",
+                "etiqueta": f"{MESES[sub - 1]} {anio}" if mensual else f"{sub}T {anio}",
+                "periodo": f"{MESES[sub - 1]} {anio}" if mensual else f"Trimestre {sub} - {anio}",
                 "facturas": 0, "total": 0.0, "tickets": 0, "revision": 0, "revisadas": 0,
             })
             if f.destino == "PROCESADA":
@@ -981,11 +1039,22 @@ def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
                 "corregible": False,
             })
 
-        todos = sorted(grupos.values(), key=lambda g: (-g["anio"], -g["trimestre"], g["empresa"]))
-        trimestres = sorted({(g["anio"], g["trimestre"]) for g in todos}, reverse=True)
-        clientes = todos
+        todos = sorted(grupos.values(), key=lambda g: (-g["anio"], -g["sub"], g["empresa"]))
+        periodos, vistos = [], set()
+        for g in todos:  # de más reciente a más antiguo, sin repetir
+            if g["clave"] not in vistos:
+                vistos.add(g["clave"])
+                periodos.append((g["clave"], g["etiqueta"]))
+        hoy_d = hoy_fecha or date.today()
+        foco = _mes_en_foco(hoy_d) if mensual else None
         if trimestre:
-            clientes = [g for g in todos if f'{g["anio"]}-{g["trimestre"]}' == trimestre]
+            clientes = [g for g in todos if g["clave"] == trimestre]
+        elif mensual:
+            # sin filtro, se enseña el mes en curso (o el último con facturas si en ese no hay ninguna)
+            clave_foco = f"{foco[0]}-{foco[1]:02d}"
+            clientes = [g for g in todos if g["clave"] == clave_foco] or [g for g in todos if periodos and g["clave"] == periodos[0][0]]
+        else:
+            clientes = todos
         for g in clientes:
             g["total"] = round(g["total"], 2)
             if g["revision"]:
@@ -995,20 +1064,31 @@ def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
             else:
                 g["estado"] = "SIN_FACTURAS"
 
-        plazo = _trimestre_en_plazo(hoy_fecha or date.today())
-        if plazo:
-            del_trim = [g for g in todos if (g["anio"], g["trimestre"]) == (plazo["anio"], plazo["trimestre"])]
-            plazo["clientes"] = len(del_trim)
-            plazo["con_revision"] = sum(1 for g in del_trim if g["revision"])
-            con_facturas = {g["cif"] for g in del_trim}
-            plazo["sin_facturas"] = sorted(
-                e.nombre for e in session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, activa=True)
-                if e.cif_nif not in con_facturas)
+        def _sin_facturas(del_periodo):
+            con_facturas = {g["cif"] for g in del_periodo}
+            return sorted(e.nombre for e in session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, activa=True)
+                          if e.cif_nif not in con_facturas)
+
+        plazo = cierre = None
+        if mensual:
+            clave_foco = f"{foco[0]}-{foco[1]:02d}"
+            del_mes = [g for g in todos if g["clave"] == clave_foco]
+            cierre = {"etiqueta": f"{MESES[foco[1] - 1]} {foco[0]}", "clientes": len(del_mes),
+                      "con_revision": sum(1 for g in del_mes if g["revision"]),
+                      "sin_facturas": _sin_facturas(del_mes)}
+        else:
+            plazo = _trimestre_en_plazo(hoy_d)
+            if plazo:
+                del_trim = [g for g in todos if (g["anio"], g["sub"]) == (plazo["anio"], plazo["trimestre"])]
+                plazo["clientes"] = len(del_trim)
+                plazo["con_revision"] = sum(1 for g in del_trim if g["revision"])
+                plazo["sin_facturas"] = _sin_facturas(del_trim)
         minutos = docs_mes * MINUTOS_POR_DOCUMENTO
         ahorro = {"documentos": docs_mes, "minutos_por_doc": MINUTOS_POR_DOCUMENTO,
                   "horas": minutos // 60, "minutos": minutos % 60}
         return {"resumen": resumen, "clientes": clientes, "atencion": atencion[:100],
-                "trimestres": trimestres, "plazo": plazo, "ahorro": ahorro}
+                "periodos": periodos, "periodo_activo": trimestre or (clientes[0]["clave"] if mensual and clientes else ""),
+                "periodicidad": periodicidad, "plazo": plazo, "cierre": cierre, "ahorro": ahorro}
     finally:
         session.close()
 

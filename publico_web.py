@@ -152,7 +152,7 @@ def _meta(titulo_seo, descripcion, ruta):
 
 PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de miEos", CABECERA + """
 <section class="p-hero"><div class="p-hero-in">
-  <h1>Las facturas llegan o las sube usted. El Excel del trimestre ya está hecho.</h1>
+  <h1>Las facturas llegan o las sube usted. El Excel ya está hecho.</h1>
   <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en el formato de miEos y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive.</p>
   <div class="acciones-hero">
     {% if logueada %}<a class="btn principal" href="{{ url_for('panel.panel') }}">Ir al panel</a>
@@ -167,7 +167,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
   <div class="pasos-p">
     <div><h3>Conecte su correo y su almacenamiento</h3><p>Gmail u Outlook / Microsoft 365 para recibir, y OneDrive o Google Drive para archivar. Son dos clics y no instala nada.</p></div>
     <div><h3>Llegan por correo o las sube usted</h3><p>Sus clientes siguen enviando facturas y tickets, en PDF o en foto, a su correo habitual, sin cambiar nada. Y usted puede subir directamente PDF, fotos escaneadas o lotes en ZIP desde el panel.</p></div>
-    <div><h3>El agente lo deja hecho</h3><p>Lee cada documento, lo anota en el Excel del cliente y del trimestre y guarda el original en su carpeta.</p></div>
+    <div><h3>El agente lo deja hecho</h3><p>Lee cada documento, lo anota en el Excel del cliente y del periodo (mes o trimestre, como prefiera) y guarda el original en su carpeta.</p></div>
   </div>
 </section>
 
@@ -175,7 +175,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
   <h2>Lo que hace por usted</h2>
   <div class="rejilla">
     <div><h3>Lee facturas y tickets</h3><p>PDF e imágenes. Si un PDF trae varias facturas, las separa y las lee una a una.</p></div>
-    <div><h3>Excel en formato miEos</h3><p>Un archivo por cliente y trimestre, con el desglose de IVA, recargo y retención.</p></div>
+    <div><h3>Excel en formato miEos</h3><p>Un archivo por cliente y mes (o trimestre), con el desglose de IVA, recargo y retención.</p></div>
     <div><h3>Carpetas en orden</h3><p>Crea sola la carpeta de cada empresa a partir del destinatario y su CIF, y aparta los tickets.</p></div>
     <div><h3>Lo dudoso, aparte</h3><p>Lo que no está claro va a una carpeta de Revisión con el motivo en el nombre. Los duplicados quedan señalados.</p></div>
     <div><h3>Corrección en un clic</h3><p>Desde el panel corrige una factura dudosa y se añade al Excel en el momento.</p></div>
@@ -247,7 +247,7 @@ PLANTILLA_TERMINOS = _legal("Condiciones del servicio", """
 <p>El servicio «Agente Facturas» (en adelante, el Servicio) lo presta {{ d.nombre }}, con NIF {{ d.nif }} y domicilio en {{ d.domicilio }} (en adelante, el Prestador). Contacto: {{ d.email }}.</p>
 
 <h2>2. En qué consiste</h2>
-<p>El Servicio lee, mediante inteligencia artificial, las facturas y tickets que llegan como adjunto al correo electrónico de la gestoría usuaria (en adelante, el Cliente), los anota en hojas de Excel por empresa y trimestre, y los archiva en el almacenamiento (OneDrive o Google Drive) que el Cliente conecta. También ofrece un panel web para consultar y corregir lo leído.</p>
+<p>El Servicio lee, mediante inteligencia artificial, las facturas y tickets que llegan como adjunto al correo electrónico de la gestoría usuaria (en adelante, el Cliente), los anota en hojas de Excel por empresa y periodo (mes o trimestre), y los archiva en el almacenamiento (OneDrive o Google Drive) que el Cliente conecta. También ofrece un panel web para consultar y corregir lo leído.</p>
 
 <h2>3. Contratación y prueba gratuita</h2>
 <ul>

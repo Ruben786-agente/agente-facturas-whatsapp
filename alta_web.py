@@ -20,7 +20,8 @@ import autenticacion_onedrive as microsoft
 from almacenamiento import obtener_almacenamiento
 from basededatos import (crear_gestoria_prueba, establecer_password, existe_email_gestoria,
                          guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial,
-                         eliminar_gestoria, email_de_gestoria, obtener_suscripcion_stripe, verificar_login)
+                         eliminar_gestoria, email_de_gestoria, obtener_suscripcion_stripe, verificar_login,
+                         obtener_periodicidad, guardar_periodicidad)
 from onboarding import preparar_gestoria, reconstruir_carpetas_empresas
 from estilo_web import acceso, pagina
 from panel_web import login_requerido
@@ -166,6 +167,20 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
 
     <section class="paso opcional">
       <span class="n">+</span>
+      <h3>Excel de sus clientes</h3>
+      <p class="que">¿Cada cuánto saca usted el Excel? El agente crea un archivo por cliente y periodo. Si lo retira de la carpeta para importarlo, las facturas siguientes irán a uno nuevo, y las que ya había leído no se repiten.</p>
+      <form method="post" action="{{ url_for('alta.cambiar_periodicidad') }}" class="estado-linea">
+        <select name="periodicidad" aria-label="Periodicidad del Excel" style="max-width:220px;">
+          <option value="mensual" {% if periodicidad == "mensual" %}selected{% endif %}>Un Excel al mes</option>
+          <option value="trimestral" {% if periodicidad == "trimestral" %}selected{% endif %}>Un Excel al trimestre</option>
+        </select>
+        <button class="btn" type="submit">Guardar</button>
+      </form>
+      <p class="tenue" style="margin-top:8px;">El cambio vale para las facturas nuevas; los Excel que ya existen no se tocan.</p>
+    </section>
+
+    <section class="paso opcional">
+      <span class="n">+</span>
       <h3>WhatsApp <small>(opcional)</small></h3>
       <p class="que">Próximamente podrá recibir también las facturas que sus clientes envíen por WhatsApp.</p>
     </section>
@@ -234,7 +249,17 @@ def conexiones():
     estado = obtener_estado_conexiones(session["tenant_id"])
     return render_template_string(PLANTILLA_CONEXIONES, e=estado, gestoria_nombre=estado["nombre"],
                                   entrada_activa=estado["almacenamiento"] == "onedrive",
+                                  periodicidad=obtener_periodicidad(session["tenant_id"]),
                                   mensaje=request.args.get("ok"), error=request.args.get("error"))
+
+
+@bp_alta.route("/conexiones/periodicidad", methods=["POST"])
+@login_requerido
+def cambiar_periodicidad():
+    if guardar_periodicidad(session["tenant_id"], request.form.get("periodicidad", "")):
+        return redirect(url_for("alta.conexiones", ok="Guardado. Las próximas facturas irán a un Excel " +
+                                ("trimestral." if request.form.get("periodicidad") == "trimestral" else "mensual.")))
+    return redirect(url_for("alta.conexiones", error="No se ha podido guardar el cambio."))
 
 
 @bp_alta.route("/conexiones/entrada")

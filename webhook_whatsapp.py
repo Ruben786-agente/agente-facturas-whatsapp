@@ -21,7 +21,7 @@ from clasificador_documentos import es_ticket, nombre_archivo_destino, procesar_
 from almacenamiento import obtener_almacenamiento
 from almacenamiento_tenant import storage_para_tenant
 from generar_excel_mieos import anadir_factura_a_excel
-from periodo_fiscal import calcular_periodo_trimestral, periodo_a_slug
+from periodo_fiscal import periodo_para, nombre_excel as nombre_del_excel
 from extraccion_ia import extraer_factura, factura_a_ticket_ligero
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -139,8 +139,8 @@ def _procesar_mensaje(phone_number_id, mensaje):
         log.info("Factura de WhatsApp sin empresa-cliente identificada -> carpeta sin identificar")
         return
 
-    periodo = calcular_periodo_trimestral(factura["fecha_factura"])
-    nombre_excel = f"Export_{empresa['cif_nif']}_{periodo_a_slug(periodo)}.xlsx"
+    periodo = periodo_para(tenant["tenant_id"], factura["fecha_factura"])
+    nombre_excel = nombre_del_excel(empresa["cif_nif"], periodo)
     archivo_existente = storage.buscar_archivo_por_nombre(empresa["carpeta_excel_id"], nombre_excel)
     contenido_existente = storage.descargar_archivo(archivo_existente.id) if archivo_existente else None
 

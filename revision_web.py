@@ -10,9 +10,10 @@ from flask import Blueprint, request, redirect, session, render_template_string,
 
 from almacenamiento_tenant import storage_para_tenant
 from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_carpeta_sin_identificar,
-                         obtener_revision, resolver_sin_identificar)
+                         obtener_revision, resolver_sin_identificar, resolver_empresa_cliente_por_cif)
 from estilo_web import pagina
 from panel_web import login_requerido
+from periodo_fiscal import nombre_excel
 from procesamiento import reprocesar_revision
 
 log = logging.getLogger("revision_web")
@@ -92,6 +93,23 @@ def abrir_sin_identificar():
     if not carpeta:
         return redirect(url_for("panel.panel"))
     return _abrir(lambda storage: storage.obtener_enlace(carpeta))
+
+
+@bp_revision.route("/abrir/excel")
+@login_requerido
+def abrir_excel():
+    """Abre en OneDrive o Google Drive el Excel de un cliente y periodo (o, si ya no está, la carpeta de Excel)."""
+    empresa = resolver_empresa_cliente_por_cif(session["tenant_id"], [request.args.get("cif", "")])
+    periodo = request.args.get("periodo", "")
+    if not empresa or not empresa.get("carpeta_excel_id"):
+        return redirect(url_for("panel.panel"))
+    carpeta = empresa["carpeta_excel_id"]
+    nombre = nombre_excel(empresa["cif_nif"], periodo)
+
+    def enlace(storage):
+        archivo = storage.buscar_archivo_por_nombre(carpeta, nombre)
+        return storage.obtener_enlace(archivo.id if archivo else carpeta)
+    return _abrir(enlace)
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from autenticacion_onedrive import refrescar_token
 from basededatos import proveedor_almacenamiento_activo
 from clasificador_documentos import es_ticket, nombre_archivo_destino, procesar_ticket
 from generar_excel_mieos import anadir_factura_a_excel
-from periodo_fiscal import calcular_periodo_trimestral, periodo_a_slug
+from periodo_fiscal import periodo_para, nombre_excel as nombre_del_excel
 from extraccion_ia import extraer_factura, factura_a_ticket_ligero
 from basededatos import (
     obtener_tenants_activos, obtener_facturas_ya_registradas,
@@ -56,11 +56,11 @@ def procesar_archivo(storage, archivo, cliente, facturas_ya_registradas):
                   " (posible duplicado)" if motivo_duplicado else "")
         return
 
-    # No es un ticket -> factura completa: Excel del trimestre que le corresponde.
+    # No es un ticket -> factura completa: Excel del periodo (mes o trimestre) que le corresponde.
     factura = factura_completa
 
-    periodo = calcular_periodo_trimestral(factura["fecha_factura"])
-    nombre_excel = f"Export_{cliente['cif_empresa_cliente']}_{periodo_a_slug(periodo)}.xlsx"
+    periodo = periodo_para(cliente["tenant_id"], factura["fecha_factura"])
+    nombre_excel = nombre_del_excel(cliente["cif_empresa_cliente"], periodo)
 
     archivo_excel_existente = storage.buscar_archivo_por_nombre(cliente["carpeta_excel_id"], nombre_excel)
     contenido_existente = storage.descargar_archivo(archivo_excel_existente.id) if archivo_excel_existente else None

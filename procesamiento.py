@@ -11,7 +11,7 @@ Reglas acordadas:
     lectura dudosa de una empresa desconocida -> "Sin identificar".
   - Una lectura dudosa nunca crea empresas nuevas (evita carpetas basura por
     un CIF mal leído).
-  - Facturas válidas: original a Facturas + fila en el Excel del trimestre.
+  - Facturas válidas: original a Facturas + fila en el Excel del periodo (mes o trimestre).
     Facturas que no cuadran: a Revisión. Tickets: a Tickets.
   - Una factura idéntica ya procesada no se vuelve a anotar en el Excel.
 """
@@ -35,7 +35,7 @@ from clasificador_documentos import es_ticket, nombre_archivo_destino, procesar_
 from extraccion_ia import extraer_factura, factura_a_ticket_ligero, _detectar_media_type
 from generar_excel_mieos import anadir_factura_a_excel
 from onboarding import alta_empresa_cliente, preparar_gestoria, reparar_empresa
-from periodo_fiscal import calcular_periodo_trimestral, periodo_a_slug
+from periodo_fiscal import periodo_para, nombre_excel as nombre_del_excel
 
 log = logging.getLogger("procesamiento")
 
@@ -151,13 +151,13 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, re
                 return {"accion": "duplicado_exacto", "empresa": empresa["nombre"], "cif": empresa["cif_nif"]}
 
     try:
-        periodo = calcular_periodo_trimestral(factura["fecha_factura"])
+        periodo = periodo_para(tenant_id, factura["fecha_factura"])
     except (ValueError, KeyError, TypeError):
         if reintento:
             return {"accion": "revision", "motivo": "fecha de la factura ilegible"}
         return _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, "fecha de la factura ilegible")
 
-    nombre_excel = f"Export_{empresa['cif_nif']}_{periodo_a_slug(periodo)}.xlsx"
+    nombre_excel = nombre_del_excel(empresa["cif_nif"], periodo)
     existente = storage.buscar_archivo_por_nombre(empresa["carpeta_excel_id"], nombre_excel)
     contenido_excel = storage.descargar_archivo(existente.id) if existente else None
 

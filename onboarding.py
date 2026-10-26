@@ -9,7 +9,7 @@ empresa-cliente; el agente crea todo en su OneDrive:
         Facturas/                (aquí suben los clientes sus facturas)
         Tickets/
         Revisión/
-        Excel/                   (aquí aparecen los Excel por trimestre)
+        Excel/                   (aquí aparecen los Excel por mes o trimestre)
 """
 
 import re

@@ -119,14 +119,32 @@ PLANTILLA_PANEL = pagina("Panel", """
       {% endif %}
     </div>
   </section>
+  {% elif cierre %}
+  {% set pendientes = cierre.con_revision %}
+  <section class="cierre">
+    <div>
+      <h1>Cierre de {{ cierre.etiqueta }}</h1>
+      <p class="sub">Para tener el Excel del mes listo para importar.</p>
+    </div>
+    <div class="progreso">
+      {% if cierre.clientes == 0 %}
+        <div class="texto"><span>Todavía no hay facturas de este mes.</span></div>
+        <div class="pista"><span style="--w:0%"></span></div>
+      {% else %}
+        <div class="texto"><span><strong>{{ cierre.clientes - pendientes }} de {{ cierre.clientes }}</strong> clientes sin nada pendiente</span></div>
+        <div class="pista"><span style="--w:{{ ((cierre.clientes - pendientes) * 100 / cierre.clientes)|round|int }}%"></span></div>
+      {% endif %}
+    </div>
+  </section>
   {% else %}
   <section class="cierre"><div><h1>Panel de facturas</h1><p class="sub">Lo que el agente ha leído y lo que necesita que mires.</p></div></section>
   {% endif %}
 
-  {% if plazo and plazo.sin_facturas %}
-  <p class="sin-envios"><strong>Sin facturas del {{ plazo.trimestre }}T {{ plazo.anio }}:</strong>
-    {% set lista = plazo.sin_facturas[:6]|join(", ") %}{{ lista }}{% if plazo.sin_facturas|length > 6 %} y {{ plazo.sin_facturas|length - 6 }} más{% endif %}{% if not lista.endswith(".") or plazo.sin_facturas|length > 6 %}.{% endif %}
-    Todavía no han enviado ninguna factura de este trimestre.</p>
+  {% set foco = plazo or cierre %}
+  {% if foco and foco.sin_facturas %}
+  <p class="sin-envios"><strong>Sin facturas de {% if plazo %}{{ plazo.trimestre }}T {{ plazo.anio }}{% else %}{{ cierre.etiqueta }}{% endif %}:</strong>
+    {% set lista = foco.sin_facturas[:6]|join(", ") %}{{ lista }}{% if foco.sin_facturas|length > 6 %} y {{ foco.sin_facturas|length - 6 }} más{% endif %}{% if not lista.endswith(".") or foco.sin_facturas|length > 6 %}.{% endif %}
+    Todavía no han enviado ninguna factura de {% if plazo %}este trimestre{% else %}este mes{% endif %}.</p>
   {% endif %}
 
   <section class="cifras" aria-label="Resumen">
@@ -165,41 +183,41 @@ PLANTILLA_PANEL = pagina("Panel", """
       </tr>
       {% endfor %}
     </table></div>
-    <p class="nota">«Marcar como gestionada» quita la línea de esta lista, sin añadirla al Excel, cuando ya la ha resuelto por su cuenta. «Corregir y añadir al Excel» le deja arreglar los datos y la anota en el Excel del trimestre.</p>
+    <p class="nota">«Marcar como gestionada» quita la línea de esta lista, sin añadirla al Excel, cuando ya la ha resuelto por su cuenta. «Corregir y añadir al Excel» le deja arreglar los datos y la anota en el Excel del {{ 'mes' if periodicidad == 'mensual' else 'trimestre' }}.</p>
     {% else %}
     <div class="vacio"><strong>No hay nada pendiente.</strong>Si una factura necesita su revisión, aparecerá aquí.</div>
     {% endif %}
   </section>
 
   <section class="seccion">
-    <div class="seccion-cab"><h2>Clientes por trimestre</h2>
-      {% if trimestres %}
-      <form method="get"><label for="t" style="display:inline;margin:0 8px 0 0;">Trimestre</label>
+    <div class="seccion-cab"><h2>{% if periodicidad == "mensual" %}Excel del mes por cliente{% else %}Excel del trimestre por cliente{% endif %}</h2>
+      {% if periodos %}
+      <form method="get"><label for="t" style="display:inline;margin:0 8px 0 0;">{% if periodicidad == "mensual" %}Mes{% else %}Trimestre{% endif %}</label>
         <select id="t" name="t" onchange="this.form.submit()">
-          <option value="">Todos</option>
-          {% for a, t in trimestres %}<option value="{{ a }}-{{ t }}" {% if filtro == (a ~ '-' ~ t) %}selected{% endif %}>{{ t }}T {{ a }}</option>{% endfor %}
+          {% if periodicidad != "mensual" %}<option value="">Todos</option>{% endif %}
+          {% for clave, etiqueta in periodos %}<option value="{{ clave }}" {% if periodo_activo == clave %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}
         </select>
       </form>
       {% endif %}
     </div>
     {% if clientes %}
     <div class="tabla"><table class="apilable">
-      <tr><th>Cliente</th><th>Trimestre</th><th class="num">Facturas</th><th class="num">Total</th><th class="num">Tickets</th><th class="num">En revisión</th><th class="num">Revisadas a mano</th><th>Estado</th></tr>
+      <tr><th>Cliente</th>{% if periodicidad != "mensual" %}<th>Trimestre</th>{% endif %}<th class="num">Facturas</th><th class="num">Total</th><th class="num">Tickets</th><th class="num">En revisión</th><th>Estado</th><th>Excel</th></tr>
       {% for c in clientes %}
       <tr>
         <td data-label="Cliente">{{ c.empresa }}<span class="sec">{{ c.cif }}</span></td>
-        <td data-label="Trimestre">{{ c.trimestre }}T {{ c.anio }}</td>
+        {% if periodicidad != "mensual" %}<td data-label="Trimestre">{{ c.etiqueta }}</td>{% endif %}
         <td data-label="Facturas" class="num">{{ c.facturas }}</td>
         <td data-label="Total" class="num">{{ c.total|eur }}</td>
         <td data-label="Tickets" class="num">{{ c.tickets }}</td>
         <td data-label="En revisión" class="num">{{ c.revision }}</td>
-        <td data-label="Revisadas a mano" class="num">{{ c.revisadas }}</td>
-        <td data-label="Estado"><span class="estado {{ c.estado }}">{{ {"LISTO": "Listo", "REVISAR": "Revisar", "SIN_FACTURAS": "Sin facturas"}[c.estado] }}</span></td>
+        <td data-label="Estado"><span class="estado {{ c.estado }}">{{ {"LISTO": "Listo para importar", "REVISAR": "Tiene pendientes", "SIN_FACTURAS": "Sin facturas"}[c.estado] }}</span></td>
+        <td data-label="Excel">{% if c.facturas %}<a class="btn" href="{{ url_for('revision.abrir_excel', cif=c.cif, periodo=c.periodo) }}" target="_blank" rel="noopener">Abrir Excel</a>{% else %}<span class="sec">-</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </table></div>
     {% else %}
-    <div class="vacio"><strong>Todavía no hay facturas procesadas.</strong>Cuando lleguen facturas a su correo, o las <a href="{{ url_for('subida.subir') }}">suba usted directamente</a>, verá aquí cada cliente por trimestre.</div>
+    <div class="vacio"><strong>Todavía no hay facturas procesadas.</strong>Cuando lleguen facturas a su correo, o las <a href="{{ url_for('subida.subir') }}">suba usted directamente</a>, verá aquí cada cliente con su Excel.</div>
     {% endif %}
   </section>
 </main>
@@ -249,7 +267,8 @@ def panel():
     todos_avisos = obtener_avisos(session["tenant_id"])
     return render_template_string(
         PLANTILLA_PANEL, resumen=datos["resumen"], atencion=datos["atencion"], clientes=datos["clientes"],
-        trimestres=datos["trimestres"], plazo=datos["plazo"], ahorro=datos["ahorro"], filtro=filtro, aviso=aviso,
+        periodos=datos["periodos"], periodo_activo=datos["periodo_activo"], periodicidad=datos["periodicidad"],
+        plazo=datos["plazo"], cierre=datos["cierre"], ahorro=datos["ahorro"], filtro=filtro, aviso=aviso,
         mensajes=get_flashed_messages(), gestoria_nombre=e["nombre"],
         avisos=[a for a in todos_avisos if a["tipo"] not in TIPOS_AVISO_INFORMATIVO],
         avisos_info=[a for a in todos_avisos if a["tipo"] in TIPOS_AVISO_INFORMATIVO])
