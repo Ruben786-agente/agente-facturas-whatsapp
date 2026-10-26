@@ -15,7 +15,7 @@ from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_car
                          obtener_revision, resolver_sin_identificar, resolver_empresa_cliente_por_cif)
 from estilo_web import pagina
 from panel_web import login_requerido
-from periodo_fiscal import nombre_excel
+from periodo_fiscal import nombres_excel_posibles
 from procesamiento import reprocesar_revision
 
 log = logging.getLogger("revision_web")
@@ -106,11 +106,14 @@ def abrir_excel():
     if not empresa or not empresa.get("carpeta_excel_id"):
         return redirect(url_for("panel.panel"))
     carpeta = empresa["carpeta_excel_id"]
-    nombre = nombre_excel(empresa["cif_nif"], periodo)
+    nombres = nombres_excel_posibles(empresa["cif_nif"], periodo)
 
     def enlace(storage):
-        archivo = storage.buscar_archivo_por_nombre(carpeta, nombre)
-        return storage.obtener_enlace(archivo.id if archivo else carpeta)
+        for nombre in nombres:
+            archivo = storage.buscar_archivo_por_nombre(carpeta, nombre)
+            if archivo:
+                return storage.obtener_enlace(archivo.id)
+        return storage.obtener_enlace(carpeta)
     return _abrir(enlace)
 
 
@@ -121,12 +124,17 @@ def descargar_excel():
     empresa = resolver_empresa_cliente_por_cif(session["tenant_id"], [request.args.get("cif", "")])
     if not empresa or not empresa.get("carpeta_excel_id"):
         return redirect(url_for("panel.panel"))
-    nombre = nombre_excel(empresa["cif_nif"], request.args.get("periodo", ""))
+    nombres = nombres_excel_posibles(empresa["cif_nif"], request.args.get("periodo", ""))
     try:
         storage = _storage(session["tenant_id"])
         if not storage:
             raise RuntimeError("No hay almacenamiento conectado")
-        archivo = storage.buscar_archivo_por_nombre(empresa["carpeta_excel_id"], nombre)
+        archivo, nombre = None, nombres[0]
+        for candidato in nombres:
+            archivo = storage.buscar_archivo_por_nombre(empresa["carpeta_excel_id"], candidato)
+            if archivo:
+                nombre = candidato
+                break
         if not archivo:
             flash("Ese Excel ya no está en la carpeta (puede que lo haya retirado). Las facturas nuevas irán a uno nuevo.")
             return redirect(url_for("panel.panel"))

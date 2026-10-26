@@ -43,3 +43,14 @@ def periodo_a_slug(periodo: str) -> str:
 
 def nombre_excel(cif_empresa: str, periodo: str) -> str:
     return f"Export_{cif_empresa}_{periodo_a_slug(periodo)}.xlsx"
+
+
+def nombres_excel_posibles(cif_empresa: str, periodo: str) -> list:
+    """Nombre del Excel de un periodo y, si es un mes, también el del trimestre que lo contiene: los Excel que se
+    crearon cuando la gestoría trabajaba por trimestres siguen con ese nombre y hay que poder encontrarlos."""
+    nombres = [nombre_excel(cif_empresa, periodo)]
+    m = re.fullmatch(r"(\w+) (\d{4})", periodo)
+    if m and m.group(1) in MESES:
+        trimestre = (MESES.index(m.group(1))) // 3 + 1
+        nombres.append(nombre_excel(cif_empresa, f"Trimestre {trimestre} - {m.group(2)}"))
+    return nombres
