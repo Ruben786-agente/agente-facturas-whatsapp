@@ -88,6 +88,45 @@ def abrir_revision(factura_id):
     return _abrir(enlace)
 
 
+def _tipo_archivo(nombre, contenido):
+    """Tipo de contenido para enseñar el original en el navegador (PDF o imagen)."""
+    n = (nombre or "").lower()
+    if contenido[:5] == b"%PDF-" or n.endswith(".pdf"):
+        return "application/pdf"
+    if contenido[:3] == b"\xff\xd8\xff" or n.endswith((".jpg", ".jpeg")):
+        return "image/jpeg"
+    if contenido[:8] == b"\x89PNG\r\n\x1a\n" or n.endswith(".png"):
+        return "image/png"
+    return "application/octet-stream"
+
+
+@bp_revision.route("/ver/revision/<factura_id>")
+@login_requerido
+def ver_revision(factura_id):
+    """Enseña la factura original en el navegador, leyéndola del almacenamiento a través del agente
+    (no hace falta abrir OneDrive ni Google Drive)."""
+    r = obtener_revision(session["tenant_id"], factura_id)
+    if not r:
+        return redirect(url_for("panel.panel"))
+    nombre = (r["datos"] or {}).get("archivo")
+    try:
+        storage = _storage(session["tenant_id"])
+        if not storage:
+            raise RuntimeError("No hay almacenamiento conectado")
+        archivo = storage.buscar_archivo_por_nombre(r["empresa"]["carpeta_revision_id"], nombre) if nombre else None
+        if not archivo:
+            flash("No se encuentra el original en la carpeta de revisión (puede que lo haya movido o borrado).")
+            return redirect(url_for("panel.panel"))
+        contenido = storage.descargar_archivo(archivo.id)
+    except Exception:
+        log.exception("No se pudo leer la factura original")
+        flash("No se ha podido abrir la factura. Compruebe que el almacenamiento sigue conectado en Conexiones.")
+        return redirect(url_for("panel.panel"))
+    tipo = _tipo_archivo(nombre, contenido)
+    return send_file(BytesIO(contenido), mimetype=tipo, as_attachment=(tipo == "application/octet-stream"),
+                     download_name=nombre or "factura")
+
+
 @bp_revision.route("/abrir/sin-identificar")
 @login_requerido
 def abrir_sin_identificar():
@@ -208,7 +247,7 @@ PLANTILLA_CORREGIR = pagina("Corregir factura", """
     </table></div>
     <div class="pie-formulario">
       <button class="btn principal grande" type="submit" name="accion" value="anadir">Añadir al Excel</button>
-      <a class="btn" href="{{ url_for('revision.abrir_revision', factura_id=factura_id) }}" target="_blank" rel="noopener">Ver el original</a>
+      <a class="btn" href="{{ url_for('revision.ver_revision', factura_id=factura_id) }}" target="_blank" rel="noopener">Ver el original</a>
     </div>
     <div class="otra-via">
       <p class="tenue">¿Ya la ha gestionado por otra vía? Puede retirarla de la lista sin añadirla al Excel.</p>

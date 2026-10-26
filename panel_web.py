@@ -173,7 +173,8 @@ PLANTILLA_PANEL = pagina("Panel", """
         <td data-label="Acciones"><div class="acciones">
           {% if p.destino == "REVISION" %}
             {% if p.corregible %}<a class="btn principal" href="{{ url_for('revision.corregir', factura_id=p.id) }}">Corregir y añadir al Excel</a>{% endif %}
-            <a class="btn" href="{{ url_for('revision.abrir_revision', factura_id=p.id) }}" target="_blank" rel="noopener">Abrir carpeta</a>
+            <a class="btn" href="{{ url_for('revision.ver_revision', factura_id=p.id) }}" target="_blank" rel="noopener">Ver factura</a>
+            <a class="btn discreto" href="{{ url_for('revision.abrir_revision', factura_id=p.id) }}" target="_blank" rel="noopener">Abrir carpeta</a>
             <form class="en-linea aparte" method="post" action="{{ url_for('revision.revisada', factura_id=p.id) }}"><button class="btn discreto" type="submit" onclick="return confirm('¿Marcar como gestionada? Desaparecerá de esta lista y no se añadirá al Excel.');">Marcar como gestionada</button></form>
           {% else %}
             <a class="btn" href="{{ url_for('revision.abrir_sin_identificar') }}" target="_blank" rel="noopener">Abrir carpeta</a>
