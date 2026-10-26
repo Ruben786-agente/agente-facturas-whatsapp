@@ -89,8 +89,12 @@ PLANTILLA_CARPETA = pagina("Archivos", """
       <td data-label="Modificado">{{ a.fecha }}</td>
       <td data-label="Tamaño" class="num">{{ a.tamano }}</td>
       <td data-label="Acciones"><div class="acciones">
+        {% if a.nombre.lower().endswith(('.xlsx', '.xls', '.csv')) %}
+        <a class="btn principal" href="{{ url_for('archivos.archivo', empresa_id=empresa_id, clave=clave, archivo_id=a.id, accion='descargar') }}">Descargar</a>
+        {% else %}
         <a class="btn principal" href="{{ url_for('archivos.archivo', empresa_id=empresa_id, clave=clave, archivo_id=a.id, accion='ver') }}" target="_blank" rel="noopener">Ver</a>
         <a class="btn" href="{{ url_for('archivos.archivo', empresa_id=empresa_id, clave=clave, archivo_id=a.id, accion='descargar') }}">Descargar</a>
+        {% endif %}
       </div></td>
     </tr>
     {% endfor %}
