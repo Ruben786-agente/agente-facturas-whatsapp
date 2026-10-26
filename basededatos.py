@@ -1410,6 +1410,15 @@ def registrar_sin_identificar(tenant_id, nombre_archivo, motivo):
         session.close()
 
 
+def obtener_sin_identificar(tenant_id, documento_id):
+    session = _obtener_session()
+    try:
+        d = session.query(DocumentoSinIdentificar).filter_by(id=documento_id, tenant_id=tenant_id).first()
+        return {"id": d.id, "nombre_archivo": d.nombre_archivo, "motivo": d.motivo} if d else None
+    finally:
+        session.close()
+
+
 def registrar_uso_ia(tokens_entrada, tokens_salida, modelo=""):
     """Suma una llamada a la IA al contador del día y del modelo. Nunca debe romper la lectura de una factura."""
     dia = datetime.now(timezone.utc).strftime("%Y-%m-%d")

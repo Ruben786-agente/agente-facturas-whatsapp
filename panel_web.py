@@ -177,7 +177,8 @@ PLANTILLA_PANEL = pagina("Panel", """
             <a class="btn discreto" href="{{ url_for('revision.abrir_revision', factura_id=p.id) }}" target="_blank" rel="noopener">Abrir carpeta</a>
             <form class="en-linea aparte" method="post" action="{{ url_for('revision.revisada', factura_id=p.id) }}"><button class="btn discreto" type="submit" onclick="return confirm('¿Marcar como gestionada? Desaparecerá de esta lista y no se añadirá al Excel.');">Marcar como gestionada</button></form>
           {% else %}
-            <a class="btn" href="{{ url_for('revision.abrir_sin_identificar') }}" target="_blank" rel="noopener">Abrir carpeta</a>
+            <a class="btn principal" href="{{ url_for('revision.asignar', documento_id=p.id) }}">Asignar a un cliente</a>
+            <a class="btn" href="{{ url_for('revision.ver_sin_identificar', documento_id=p.id) }}" target="_blank" rel="noopener">Ver documento</a>
             <form class="en-linea aparte" method="post" action="{{ url_for('revision.sin_identificar_revisado', documento_id=p.id) }}"><button class="btn discreto" type="submit" onclick="return confirm('¿Marcar como gestionado? Desaparecerá de esta lista.');">Marcar como gestionado</button></form>
           {% endif %}
         </div></td>

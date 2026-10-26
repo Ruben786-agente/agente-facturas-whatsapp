@@ -14,11 +14,13 @@ from flask import Blueprint, request, redirect, session, render_template_string,
 from almacenamiento_tenant import storage_para_tenant
 from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_carpeta_sin_identificar,
                          obtener_revision, resolver_sin_identificar, resolver_empresa_cliente_por_cif,
-                         listar_proveedores_aprendidos, olvidar_proveedor_aprendido)
+                         listar_proveedores_aprendidos, olvidar_proveedor_aprendido,
+                         obtener_sin_identificar, listar_empresas_activas)
 from estilo_web import pagina
 from panel_web import login_requerido
 from periodo_fiscal import nombres_excel_posibles
-from procesamiento import reprocesar_revision
+from procesamiento import reprocesar_revision, asignar_sin_identificar
+from clasificador_documentos import nombre_archivo_destino
 
 log = logging.getLogger("revision_web")
 bp_revision = Blueprint("revision", __name__)
@@ -127,6 +129,63 @@ def ver_revision(factura_id):
     tipo = _tipo_archivo(nombre, contenido)
     return send_file(BytesIO(contenido), mimetype=tipo, as_attachment=(tipo == "application/octet-stream"),
                      download_name=nombre or "factura")
+
+
+@bp_revision.route("/sin-identificar/<documento_id>/ver")
+@login_requerido
+def ver_sin_identificar(documento_id):
+    """Enseña un documento de «Sin identificar» leyéndolo a través del agente."""
+    d = obtener_sin_identificar(session["tenant_id"], documento_id)
+    carpeta = obtener_carpeta_sin_identificar(session["tenant_id"])
+    if not d or not carpeta:
+        return redirect(url_for("panel.panel"))
+    nombre = nombre_archivo_destino(d["nombre_archivo"], "REVISION", d["motivo"])
+    try:
+        storage = _storage(session["tenant_id"])
+        archivo = storage.buscar_archivo_por_nombre(carpeta, nombre) if storage else None
+        if not archivo:
+            flash("No se encuentra el documento en la carpeta «Sin identificar» (puede que lo haya movido o borrado).")
+            return redirect(url_for("panel.panel"))
+        contenido = storage.descargar_archivo(archivo.id)
+    except Exception:
+        log.exception("No se pudo leer el documento sin identificar")
+        flash("No se ha podido abrir el documento. Compruebe que el almacenamiento sigue conectado en Conexiones.")
+        return redirect(url_for("panel.panel"))
+    tipo = _tipo_archivo(nombre, contenido)
+    return send_file(BytesIO(contenido), mimetype=tipo, as_attachment=(tipo == "application/octet-stream"), download_name=nombre)
+
+
+
+
+@bp_revision.route("/sin-identificar/<documento_id>/asignar", methods=["GET", "POST"])
+@login_requerido
+def asignar(documento_id):
+    tenant_id = session["tenant_id"]
+    d = obtener_sin_identificar(tenant_id, documento_id)
+    if not d:
+        flash("Ese documento ya no está pendiente.")
+        return redirect(url_for("panel.panel"))
+    error = None
+    if request.method == "POST":
+        try:
+            storage = _storage(tenant_id)
+            if not storage:
+                raise RuntimeError("No hay almacenamiento conectado")
+            res = asignar_sin_identificar(storage, tenant_id, d, request.form.get("cif_empresa", ""))
+            if res["accion"] == "error":
+                error = res["motivo"]
+            else:
+                destino = {"procesada": "Anotada en el Excel.", "duplicado_exacto": "Ya estaba anotada, no se ha duplicado.",
+                           "ticket": "Guardada como ticket.", "revision": "Ha quedado en la Revisión de ese cliente para que la corrija (" + str(res.get("motivo") or "") + ")."
+                           }.get(res["accion"], "Hecho.")
+                flash(f"Asignada a {res['empresa']}. {destino}")
+                return redirect(url_for("panel.panel"))
+        except Exception:
+            log.exception("Fallo asignando el documento %s", documento_id)
+            error = "Ha habido un problema. Inténtelo de nuevo."
+    return render_template_string(PLANTILLA_ASIGNAR, documento_id=documento_id, motivo=d["motivo"] or "-", error=error,
+                                  empresas=listar_empresas_activas(tenant_id),
+                                  gestoria_nombre=obtener_estado_conexiones(tenant_id)["nombre"])
 
 
 @bp_revision.route("/abrir/sin-identificar")
@@ -295,6 +354,47 @@ PLANTILLA_CONFIRMACION = pagina("Hecho", """
     {% if otra %}<a class="btn" href="{{ url_for('revision.corregir', factura_id=otra) }}">Corregir la siguiente en Revisión</a>{% endif %}
   </div>
 </main>
+""", extra_head=CSS_CORREGIR)
+
+
+PLANTILLA_ASIGNAR = pagina("Asignar a un cliente", """
+<main class="pagina estrecha" style="max-width:700px;">
+  <a class="volver" href="{{ url_for('panel.panel') }}">&larr; Volver al panel</a>
+  <h1 style="font-size:36px;">¿De qué cliente es este documento?</h1>
+  <p class="alerta motivo">Por qué está sin identificar: <strong>{{ motivo }}</strong></p>
+  {% if error %}<p class="alerta error" role="alert">{{ error }}</p>{% endif %}
+  <form class="formulario" method="post">
+    <label for="cif_empresa">Cliente al que pertenece</label>
+    <select id="cif_empresa" name="cif_empresa" required>
+      {% if empresas|length != 1 %}<option value="">Elija un cliente…</option>{% endif %}
+      {% for e in empresas %}<option value="{{ e.cif_nif }}" {% if empresas|length == 1 %}selected{% endif %}>{{ e.nombre }} ({{ e.cif_nif }})</option>{% endfor %}
+    </select>
+    <p class="tenue" style="margin-top:10px;">El agente volverá a leer el documento con ese cliente como comprador. Si todo cuadra, lo anota en el Excel; si algo
+    es dudoso, lo deja en la Revisión de ese cliente para que lo corrija.</p>
+    <div class="pie-formulario">
+      <button class="btn principal grande" type="submit">Asignar y añadir</button>
+      <a class="btn" href="{{ url_for('revision.ver_sin_identificar', documento_id=documento_id) }}" target="_blank" rel="noopener">Ver el documento</a>
+    </div>
+  </form>
+</main>
+<div class="trabajando" id="trabajando" role="alert" aria-live="assertive">
+  <div class="rueda" aria-hidden="true"></div>
+  <strong>Leyendo y añadiendo…</strong>
+  <span class="tenue">Puede tardar unos segundos. No cierre ni recargue esta página.</span>
+</div>
+<script>
+(function () {
+  var f = document.querySelector("form.formulario"), enviado = false;
+  f.addEventListener("submit", function (e) {
+    if (enviado) { e.preventDefault(); return; }
+    enviado = true; document.getElementById("trabajando").classList.add("activo");
+    setTimeout(function () { f.querySelectorAll("button").forEach(function (x) { x.disabled = true; }); }, 0);
+  });
+  window.addEventListener("pageshow", function (ev) {
+    if (ev.persisted) { enviado = false; document.getElementById("trabajando").classList.remove("activo"); f.querySelectorAll("button").forEach(function (x) { x.disabled = false; }); }
+  });
+})();
+</script>
 """, extra_head=CSS_CORREGIR)
 
 

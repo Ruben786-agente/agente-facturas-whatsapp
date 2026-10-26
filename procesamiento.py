@@ -29,7 +29,7 @@ from validar_cif import comprobar as comprobar_cif
 from basededatos import aprender_proveedor, buscar_proveedor_aprendido
 from basededatos import (
     crear_aviso, documento_ya_visto, eliminar_factura_cache, marcar_documento_visto, marcar_revisada,
-    obtener_revision, registrar_sin_identificar,
+    obtener_revision, registrar_sin_identificar, resolver_sin_identificar,
     guardar_factura_procesada, obtener_carpeta_sin_identificar,
     obtener_facturas_ya_registradas, resolver_empresa_cliente_por_cif,
 )
@@ -498,6 +498,35 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
     if primer_error:
         raise primer_error
     return resultados
+
+
+def asignar_sin_identificar(storage, tenant_id, documento, cif_empresa):
+    """
+    La gestoría indica a qué cliente pertenece un documento de «Sin identificar». Se vuelve a leer, se le pone ese cliente como comprador
+    y sigue el camino normal: al Excel si todo cuadra, a la Revisión de ese cliente si hay algo dudoso (ahí podrá corregirlo).
+    """
+    empresa = resolver_empresa_cliente_por_cif(tenant_id, [cif_empresa])
+    if not empresa:
+        return {"accion": "error", "motivo": "Ese cliente ya no existe."}
+    carpeta = obtener_carpeta_sin_identificar(tenant_id)
+    nombre_en_carpeta = nombre_archivo_destino(documento["nombre_archivo"], "REVISION", documento["motivo"])
+    archivo = storage.buscar_archivo_por_nombre(carpeta, nombre_en_carpeta) if carpeta else None
+    if not archivo:
+        return {"accion": "error", "motivo": "No se encuentra el archivo en la carpeta «Sin identificar» (puede que lo haya movido o borrado)."}
+    contenido = storage.descargar_archivo(archivo.id)
+    factura = extraer_factura(contenido)
+    if factura.get("_lectura_fallida"):
+        return {"accion": "error", "motivo": "No se ha podido leer ahora mismo. Inténtelo de nuevo en un momento."}
+    if factura.get("es_documento_fiscal") is False:
+        return {"accion": "error", "motivo": "El documento no parece una factura ni un ticket."}
+    factura = {**factura, "sin_cif_destinatario": False,
+               "destinatario": {**(factura.get("destinatario") or {}), "cif_nif": empresa["cif_nif"]}}
+    res = _archivar_con_reparacion(storage, tenant_id, contenido, documento["nombre_archivo"], factura)
+    if res.get("accion") == "sin_identificar":
+        return {"accion": "error", "motivo": res.get("motivo") or "No se ha podido asignar."}
+    storage.eliminar_archivo(archivo.id)
+    resolver_sin_identificar(tenant_id, documento["id"])
+    return {**res, "empresa": empresa["nombre"]}
 
 
 def reprocesar_revision(storage, tenant_id, factura_id, factura):
