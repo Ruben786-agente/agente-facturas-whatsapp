@@ -6,7 +6,9 @@ y corregir a mano una factura en Revisión para añadirla al Excel.
 
 import logging
 
-from flask import Blueprint, request, redirect, session, render_template_string, url_for, flash
+from io import BytesIO
+
+from flask import Blueprint, request, redirect, session, render_template_string, url_for, flash, send_file
 
 from almacenamiento_tenant import storage_para_tenant
 from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_carpeta_sin_identificar,
@@ -110,6 +112,31 @@ def abrir_excel():
         archivo = storage.buscar_archivo_por_nombre(carpeta, nombre)
         return storage.obtener_enlace(archivo.id if archivo else carpeta)
     return _abrir(enlace)
+
+
+@bp_revision.route("/descargar/excel")
+@login_requerido
+def descargar_excel():
+    """Descarga el Excel de un cliente y periodo a través del agente: no hace falta abrir OneDrive ni Google Drive."""
+    empresa = resolver_empresa_cliente_por_cif(session["tenant_id"], [request.args.get("cif", "")])
+    if not empresa or not empresa.get("carpeta_excel_id"):
+        return redirect(url_for("panel.panel"))
+    nombre = nombre_excel(empresa["cif_nif"], request.args.get("periodo", ""))
+    try:
+        storage = _storage(session["tenant_id"])
+        if not storage:
+            raise RuntimeError("No hay almacenamiento conectado")
+        archivo = storage.buscar_archivo_por_nombre(empresa["carpeta_excel_id"], nombre)
+        if not archivo:
+            flash("Ese Excel ya no está en la carpeta (puede que lo haya retirado). Las facturas nuevas irán a uno nuevo.")
+            return redirect(url_for("panel.panel"))
+        contenido = storage.descargar_archivo(archivo.id)
+    except Exception:
+        log.exception("No se pudo descargar el Excel")
+        flash("No se ha podido descargar el Excel. Compruebe que el almacenamiento sigue conectado en Conexiones.")
+        return redirect(url_for("panel.panel"))
+    return send_file(BytesIO(contenido), as_attachment=True, download_name=nombre,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 # ---------------------------------------------------------------------------
