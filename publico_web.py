@@ -410,7 +410,7 @@ def sitemap():
 
 # Precios en dólares por millón de tokens (entrada, salida), según las tarifas públicas consultadas en octubre de 2026.
 # Se pueden cambiar sin tocar el código con la variable PRECIOS_IA, por ejemplo: {"claude-haiku-5-5": [0.10, 0.50]}
-PRECIOS_IA = {"claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-5-5": (0.10, 0.50)}
+PRECIOS_IA = {"claude-sonnet-5-5": (2.0, 10.0), "claude-haiku-5-5": (0.10, 0.50), "claude-opus-5-5": (4.0, 20.0)}
 
 
 def _precios_ia():
