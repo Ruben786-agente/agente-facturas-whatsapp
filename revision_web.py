@@ -13,7 +13,8 @@ from flask import Blueprint, request, redirect, session, render_template_string,
 
 from almacenamiento_tenant import storage_para_tenant
 from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_carpeta_sin_identificar,
-                         obtener_revision, resolver_sin_identificar, resolver_empresa_cliente_por_cif)
+                         obtener_revision, resolver_sin_identificar, resolver_empresa_cliente_por_cif,
+                         listar_proveedores_aprendidos, olvidar_proveedor_aprendido)
 from estilo_web import pagina
 from panel_web import login_requerido
 from periodo_fiscal import nombres_excel_posibles
@@ -290,6 +291,7 @@ PLANTILLA_CONFIRMACION = pagina("Hecho", """
   </div>
   <div class="pie-formulario" style="margin-top:24px;">
     <a class="btn principal grande" href="{{ url_for('panel.panel') }}">Volver al panel</a>
+    <a class="btn" href="{{ url_for('revision.recordados') }}">Proveedores recordados</a>
     {% if otra %}<a class="btn" href="{{ url_for('revision.corregir', factura_id=otra) }}">Corregir la siguiente en Revisión</a>{% endif %}
   </div>
 </main>
@@ -347,6 +349,47 @@ def _factura_desde_formulario(original, form):
     emisor = {**(original.get("emisor") or {}), "nombre": form.get("emisor_nombre", "").strip(), "cif_nif": cif}
     return {**original, "fecha_factura": form.get("fecha", "").strip(), "num_factura": form.get("numero", "").strip(),
             "total_factura": _numero(form.get("total")), "emisor": emisor, "desgloses": desgloses}
+
+
+PLANTILLA_RECORDADOS = pagina("Proveedores recordados", """
+<main class="pagina" style="max-width:820px;">
+  <h1 style="font-size:34px;">Proveedores recordados</h1>
+  <p class="tenue" style="margin-top:10px;">Cuando usted corrige a mano el CIF de un proveedor, el agente lo recuerda. Si una factura posterior de ese mismo
+  proveedor llega con el CIF ilegible o incompleto, lo completa con el que usted confirmó. Nunca cambia un CIF que haya leído bien.
+  Aquí puede ver lo que recuerda y borrarlo.</p>
+  {% with m = get_flashed_messages() %}{% if m %}<p class="mensaje" role="status" style="margin-top:16px;">{{ m[0] }}</p>{% endif %}{% endwith %}
+  {% if filas %}
+  <div class="tabla" style="margin-top:22px;"><table class="apilable">
+    <tr><th>Proveedor</th><th>CIF recordado</th><th class="num">Veces usado</th><th></th></tr>
+    {% for f in filas %}
+    <tr>
+      <td data-label="Proveedor">{{ f.nombre }}</td><td data-label="CIF recordado">{{ f.cif_nif }}</td><td data-label="Veces usado" class="num">{{ f.veces }}</td>
+      <td><form method="post" action="{{ url_for('revision.olvidar', aprendido_id=f.id) }}"><button class="btn" type="submit">Olvidar</button></form></td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% else %}
+  <div class="vacio" style="margin-top:22px;"><strong>Todavía no recuerda ningún proveedor.</strong>Aparecerán aquí cuando corrija el CIF de una factura en Revisión.</div>
+  {% endif %}
+  <p style="margin-top:22px;"><a class="btn" href="{{ url_for('panel.panel') }}">Volver al panel</a></p>
+</main>
+""")
+
+
+@bp_revision.route("/proveedores-recordados")
+@login_requerido
+def recordados():
+    tenant_id = session["tenant_id"]
+    return render_template_string(PLANTILLA_RECORDADOS, filas=listar_proveedores_aprendidos(tenant_id),
+                                  gestoria_nombre=obtener_estado_conexiones(tenant_id)["nombre"])
+
+
+@bp_revision.route("/proveedores-recordados/<aprendido_id>/olvidar", methods=["POST"])
+@login_requerido
+def olvidar(aprendido_id):
+    flash("Hecho: el agente ya no recuerda ese proveedor." if olvidar_proveedor_aprendido(session["tenant_id"], aprendido_id)
+          else "Ese proveedor ya no estaba en la lista.")
+    return redirect(url_for("revision.recordados"))
 
 
 @bp_revision.route("/revision/<factura_id>/corregir", methods=["GET", "POST"])

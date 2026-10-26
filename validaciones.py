@@ -65,7 +65,9 @@ def problemas_factura(factura, hoy=None):
     hoy = hoy or datetime.now()
 
     cif_emisor = (factura.get("emisor") or {}).get("cif_nif")
-    if not (cif_emisor or "").strip():
+    if factura.get("es_factura_simplificada") or factura.get("formato_ticket_tpv") or factura.get("sin_cif_destinatario"):
+        pass                                          # tickets: no llevan al Excel, no se exige CIF del proveedor
+    elif not (cif_emisor or "").strip():
         problemas.append("no se ha leído el CIF del proveedor")
     elif comprobar_cif_emisor(cif_emisor)[1]:      # mal formado, incompleto o con el control incorrecto
         problemas.append(f"el NIF/CIF del proveedor no es válido ({_limpia(cif_emisor)}): posible error de lectura")
@@ -73,7 +75,7 @@ def problemas_factura(factura, hoy=None):
     if control_nif_cif_correcto(cif_comprador) is False:
         problemas.append(f"el NIF/CIF del comprador no es válido ({_limpia(cif_comprador)}): posible error de lectura")
 
-    if not _dinero(factura.get("total_factura")):
+    if not _dinero(factura.get("total_factura")) and not factura.get("formato_ticket_tpv"):
         problemas.append("el total de la factura es cero o no se ha leído")
 
     if not (factura.get("num_factura") or "").strip():

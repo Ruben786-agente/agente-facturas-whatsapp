@@ -25,6 +25,8 @@ import re
 import requests
 from datetime import datetime
 
+from validar_cif import comprobar as comprobar_cif
+from basededatos import aprender_proveedor, buscar_proveedor_aprendido
 from basededatos import (
     crear_aviso, documento_ya_visto, eliminar_factura_cache, marcar_documento_visto, marcar_revisada,
     obtener_revision, registrar_sin_identificar,
@@ -273,6 +275,17 @@ def _corregir_con_conocidos(tenant_id, factura):
     cambios = {}
     emisor = factura.get("emisor") or {}
     cif = _normaliza_cif(emisor.get("cif_nif"))
+    ticket = factura.get("es_factura_simplificada") or factura.get("formato_ticket_tpv") or factura.get("sin_cif_destinatario")
+    if not ticket and comprobar_cif(cif)[1] and (emisor.get("nombre") or "").strip():
+        # El CIF del proveedor falta o no es válido: si la gestoría ya confirmó a mano el de ese proveedor (mismo nombre), se usa.
+        # Un CIF bien leído nunca se sustituye.
+        aprendido = buscar_proveedor_aprendido(tenant_id, emisor.get("nombre"))
+        if aprendido:
+            crear_aviso(tenant_id, "cif_aprendido",
+                        f"Se ha completado el CIF de {aprendido['nombre']} ({aprendido['cif_nif']}) con el que usted confirmó antes. "
+                        "Puede ver y borrar lo que el agente recuerda en «Proveedores recordados».")
+            return {**factura, "emisor": {**emisor, "cif_nif": aprendido["cif_nif"]},
+                    "relectura": factura.get("relectura") or "cif_aprendido"}
     if cif and control_nif_cif_correcto(cif) is False:
         palabras = _palabras(emisor.get("nombre"))
         candidatos = {_normaliza_cif(k["cif_nif"]) for k in proveedores_conocidos(tenant_id)
@@ -511,6 +524,13 @@ def reprocesar_revision(storage, tenant_id, factura_id, factura):
     factura["confianza"] = "alta"
     res = _guardar_factura(storage, tenant_id, empresa, original, contenido, factura, reintento=True)
     if res["accion"] == "procesada":
+        try:  # el CIF que la persona ha escrito o corregido se recuerda para la próxima factura de ese proveedor
+            antes = _normaliza_cif(((datos.get("factura") or {}).get("emisor") or {}).get("cif_nif"))
+            ahora = _normaliza_cif((factura.get("emisor") or {}).get("cif_nif"))
+            if ahora and ahora != antes:
+                aprender_proveedor(tenant_id, (factura.get("emisor") or {}).get("nombre"), ahora)
+        except Exception:
+            log.exception("No se pudo recordar el proveedor")
         eliminar_factura_cache(tenant_id, factura_id)  # _guardar_factura ya ha creado su registro PROCESADA
         if archivo:
             storage.eliminar_archivo(archivo.id)  # el original ya está en Facturas

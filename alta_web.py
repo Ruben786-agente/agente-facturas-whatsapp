@@ -177,6 +177,7 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
         <button class="btn" type="submit">Guardar</button>
       </form>
       <p class="tenue" style="margin-top:8px;">El cambio vale para las facturas nuevas; los Excel que ya existen no se tocan.</p>
+      <p style="margin-top:12px;"><a href="{{ url_for('revision.recordados') }}">Proveedores recordados</a> <span class="tenue">· los CIF que el agente ha aprendido de sus correcciones</span></p>
     </section>
 
     <section class="paso opcional">

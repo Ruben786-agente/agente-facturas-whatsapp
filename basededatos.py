@@ -102,6 +102,19 @@ class FacturaCache(Base):
     procesada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class ProveedorAprendido(Base):
+    """CIF que la gestoría confirmó a mano para un proveedor. Cada gestoría tiene los suyos."""
+    __tablename__ = "proveedores_aprendidos"
+    __table_args__ = (UniqueConstraint("tenant_id", "nombre_norm", name="uq_aprendido_tenant_nombre"),)
+    id = _uuid_column()
+    tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), nullable=False)
+    nombre_norm = Column(String, nullable=False)
+    nombre = Column(String, nullable=False)
+    cif_nif = Column(String, nullable=False)
+    veces_usado = Column(Integer, nullable=False, default=0)
+    creado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class CorreoProcesado(Base):
     __tablename__ = "correos_procesados"
     __table_args__ = (UniqueConstraint("tenant_id", "mensaje_id", name="uq_correo_tenant_mensaje"),)
@@ -1306,7 +1319,70 @@ def obtener_avisos(tenant_id):
         session.close()
 
 
-TIPOS_AVISO_INFORMATIVO = ("empresa_nueva",)  # no son un problema: solo informan de algo que ha hecho el agente
+def _nombre_norm(nombre):
+    """Nombre de proveedor sin tildes, signos ni formas jurídicas (SL, SA...): «Suministros López, S.L.» = «SUMINISTROS LOPEZ»."""
+    import re
+    import unicodedata
+    t = unicodedata.normalize("NFD", nombre or "").encode("ascii", "ignore").decode().upper().replace(".", "")
+    palabras = [p for p in re.findall(r"[A-Z0-9]+", t) if p not in {"SL", "SLU", "SA", "SAU", "SC", "CB", "SLL", "SOCIEDAD", "LIMITADA", "ANONIMA"}]
+    return " ".join(palabras)
+
+
+def aprender_proveedor(tenant_id, nombre, cif_nif):
+    """Guarda (o actualiza) el CIF que la gestoría ha confirmado para este proveedor. El último confirmado manda."""
+    norm = _nombre_norm(nombre)
+    if len(norm) < 4 or not cif_nif:
+        return False
+    session = _obtener_session()
+    try:
+        fila = session.query(ProveedorAprendido).filter_by(tenant_id=tenant_id, nombre_norm=norm).first()
+        if fila:
+            fila.cif_nif, fila.nombre = cif_nif, nombre.strip()
+        else:
+            session.add(ProveedorAprendido(tenant_id=tenant_id, nombre_norm=norm, nombre=nombre.strip(), cif_nif=cif_nif))
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def buscar_proveedor_aprendido(tenant_id, nombre):
+    """CIF aprendido de un proveedor con exactamente este nombre (ya normalizado), o None."""
+    norm = _nombre_norm(nombre)
+    if len(norm) < 4:
+        return None
+    session = _obtener_session()
+    try:
+        fila = session.query(ProveedorAprendido).filter_by(tenant_id=tenant_id, nombre_norm=norm).first()
+        if not fila:
+            return None
+        fila.veces_usado = (fila.veces_usado or 0) + 1
+        session.commit()
+        return {"cif_nif": fila.cif_nif, "nombre": fila.nombre}
+    finally:
+        session.close()
+
+
+def listar_proveedores_aprendidos(tenant_id):
+    session = _obtener_session()
+    try:
+        filas = session.query(ProveedorAprendido).filter_by(tenant_id=tenant_id).order_by(ProveedorAprendido.nombre).all()
+        return [{"id": f.id, "nombre": f.nombre, "cif_nif": f.cif_nif, "veces": f.veces_usado or 0} for f in filas]
+    finally:
+        session.close()
+
+
+def olvidar_proveedor_aprendido(tenant_id, aprendido_id):
+    session = _obtener_session()
+    try:
+        n = session.query(ProveedorAprendido).filter_by(tenant_id=tenant_id, id=aprendido_id).delete()
+        session.commit()
+        return bool(n)
+    finally:
+        session.close()
+
+
+TIPOS_AVISO_INFORMATIVO = ("empresa_nueva", "cif_aprendido")  # no son un problema: solo informan de algo que ha hecho el agente
 
 
 def marcar_avisos_vistos(tenant_id, grupo=None):
