@@ -138,6 +138,21 @@ def _guardar_ticket(storage, tenant_id, empresa, nombre, contenido, factura):
     return {"accion": "ticket", "empresa": empresa["nombre"], "cif": empresa["cif_nif"], "posible_duplicado": bool(posible_duplicado)}
 
 
+def _se_parece_a_una_anotada(tenant_id, empresa, factura, numero, cif_emisor, total):
+    """Casi-duplicados que el control exacto no ve. Devuelve el motivo, o None si no hay nada sospechoso."""
+    nombre = _palabras((factura.get("emisor") or {}).get("nombre"))
+    for f in obtener_facturas_ya_registradas(tenant_id, empresa["cif_nif"]):
+        if f.get("destino") != "PROCESADA" or f["num_factura"] != numero:
+            continue
+        cif_f = _normaliza_cif(f["emisor"].get("cif_nif"))
+        mismo_total = abs(f["total_factura"] - total) <= 0.01
+        if cif_f == cif_emisor and not mismo_total:
+            return f"este proveedor ya tiene anotada una factura con el mismo número ({numero}) pero con otro importe"
+        if cif_f != cif_emisor and mismo_total and nombre & _palabras(f["emisor"].get("nombre")):
+            return "parece la misma factura que ya está anotada, pero el CIF del proveedor no coincide (posible error de lectura)"
+    return None
+
+
 def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, reintento=False):
     numero = (factura.get("num_factura") or "").strip()
     cif_emisor = _normaliza_cif((factura.get("emisor") or {}).get("cif_nif"))
@@ -149,6 +164,11 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, re
                     and _normaliza_cif(f["emisor"].get("cif_nif")) == cif_emisor
                     and abs(f["total_factura"] - total) <= 0.01):
                 return {"accion": "duplicado_exacto", "empresa": empresa["nombre"], "cif": empresa["cif_nif"]}
+
+    if numero and not reintento:
+        sospechosa = _se_parece_a_una_anotada(tenant_id, empresa, factura, numero, cif_emisor, total)
+        if sospechosa:
+            return _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, sospechosa)
 
     try:
         periodo = periodo_para(tenant_id, factura["fecha_factura"])

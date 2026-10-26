@@ -18,6 +18,14 @@ ANCHOS_COLUMNA = {
 TOLERANCIA_CUADRE = 0.02
 
 
+def _escribe_celda(ws, fila, columna, valor):
+    """Escribe un valor; un texto que empiece por = + - @ se guarda como texto, nunca como fórmula de Excel."""
+    celda = ws.cell(row=fila, column=columna, value=valor)
+    if isinstance(valor, str) and valor[:1] in ("=", "+", "-", "@"):
+        celda.data_type = "s"
+    return celda
+
+
 def _valida_cuadre(factura):
     suma = 0.0
     for d in factura["desgloses"]:
@@ -59,7 +67,7 @@ def _escribe_hoja(ws, cif_empresa, nombre_empresa, periodo, filas):
     fila_actual = 4
     for fila in filas:
         for col_idx, valor in enumerate(fila, start=1):
-            celda = ws.cell(row=fila_actual, column=col_idx, value=valor)
+            celda = _escribe_celda(ws, fila_actual, col_idx, valor)
             if col_idx in FORMATOS_NUMERO:
                 celda.number_format = FORMATOS_NUMERO[col_idx]
             if col_idx == COLUMNA_TEXTO_FACTURA:
@@ -145,7 +153,7 @@ def anadir_factura_a_excel(contenido_existente, cif_empresa, nombre_empresa, per
     fila_destino = ws.max_row + 1
     for fila in filas_nuevas:
         for col_idx, valor in enumerate(fila, start=1):
-            celda = ws.cell(row=fila_destino, column=col_idx, value=valor)
+            celda = _escribe_celda(ws, fila_destino, col_idx, valor)
             if col_idx in FORMATOS_NUMERO:
                 celda.number_format = FORMATOS_NUMERO[col_idx]
             if col_idx == COLUMNA_TEXTO_FACTURA:

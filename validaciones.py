@@ -14,6 +14,7 @@ comprueba aparte, en generar_excel_mieos.)
 """
 
 import re
+from validar_cif import comprobar as comprobar_cif_emisor
 from datetime import datetime, timedelta
 
 LETRAS_NIF = "TRWAGMYFPDXBNJZSQVHLCKE"
@@ -63,10 +64,17 @@ def problemas_factura(factura, hoy=None):
     problemas = []
     hoy = hoy or datetime.now()
 
-    for rol, clave in (("emisor", "emisor"), ("comprador", "destinatario")):
-        cif = (factura.get(clave) or {}).get("cif_nif")
-        if control_nif_cif_correcto(cif) is False:
-            problemas.append(f"el NIF/CIF del {rol} no es válido ({_limpia(cif)}): posible error de lectura")
+    cif_emisor = (factura.get("emisor") or {}).get("cif_nif")
+    if not (cif_emisor or "").strip():
+        problemas.append("no se ha leído el CIF del proveedor")
+    elif comprobar_cif_emisor(cif_emisor)[1]:      # mal formado, incompleto o con el control incorrecto
+        problemas.append(f"el NIF/CIF del proveedor no es válido ({_limpia(cif_emisor)}): posible error de lectura")
+    cif_comprador = (factura.get("destinatario") or {}).get("cif_nif")
+    if control_nif_cif_correcto(cif_comprador) is False:
+        problemas.append(f"el NIF/CIF del comprador no es válido ({_limpia(cif_comprador)}): posible error de lectura")
+
+    if not _dinero(factura.get("total_factura")):
+        problemas.append("el total de la factura es cero o no se ha leído")
 
     if not (factura.get("num_factura") or "").strip():
         problemas.append("no se ha leído el número de factura")
