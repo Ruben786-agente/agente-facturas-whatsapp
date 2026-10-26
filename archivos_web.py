@@ -8,6 +8,8 @@ está dentro de la carpeta elegida (nunca se acepta una carpeta ni un archivo cu
 """
 
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import BytesIO
 
@@ -24,6 +26,8 @@ bp_archivos = Blueprint("archivos", __name__)
 
 CARPETAS = {"facturas": "Facturas", "tickets": "Tickets", "revision": "Revisión", "excel": "Excel"}
 MAX_ARCHIVOS = 300
+SEGUNDOS_MEMORIA = 20      # lo que tarda en reflejarse un archivo nuevo en la página de inicio
+_memoria = {}
 
 CSS_ARCHIVOS = """
 <style>
@@ -45,13 +49,15 @@ PLANTILLA_INICIO = pagina("Archivos", """
   {% if not conectado %}
     <p class="alerta" role="alert" style="margin-top:20px;">Conecte su almacenamiento (OneDrive o Google Drive) para ver aquí los archivos.
       <a class="btn" href="{{ url_for('alta.conexiones') }}">Ir a Conexiones</a></p>
+  {% elif error %}
+    <p class="alerta error" role="alert" style="margin-top:20px;">No se han podido leer sus carpetas. Compruebe que el almacenamiento sigue conectado en Conexiones.</p>
   {% else %}
   <div class="tarjetas">
     {% for e in empresas %}
     <div class="tarjeta">
       <h3>{{ e.nombre }}</h3><span class="cif">{{ e.cif_nif }}</span>
       <div class="enlaces">
-        {% for clave, titulo in carpetas.items() %}{% if e[clave] %}<a class="btn" href="{{ url_for('archivos.carpeta', empresa_id=e.id, clave=clave) }}">{{ titulo }}</a>{% endif %}{% endfor %}
+        {% for clave in e.con_archivos %}<a class="btn" href="{{ url_for('archivos.carpeta', empresa_id=e.id, clave=clave) }}">{{ carpetas[clave] }}</a>{% endfor %}
       </div>
     </div>
     {% endfor %}
@@ -63,7 +69,7 @@ PLANTILLA_INICIO = pagina("Archivos", """
     {% endif %}
   </div>
   {% if not empresas and not sin_identificar %}
-    <div class="vacio"><strong>Todavía no hay clientes.</strong>Cuando el agente lea la primera factura, aquí aparecerá la carpeta de cada cliente.</div>
+    <div class="vacio"><strong>Todavía no hay archivos.</strong>Cuando el agente lea la primera factura, aquí aparecerá la carpeta de cada cliente.</div>
   {% endif %}
   {% endif %}
 </main>
@@ -124,15 +130,50 @@ def _resolver(tenant_id, empresa_id, clave):
     return None
 
 
+def _tiene_archivos(storage, carpeta_id):
+    """True / False, o None si no se ha podido mirar (en ese caso se enseña la carpeta, por si acaso)."""
+    try:
+        return bool(storage.listar_contenido(carpeta_id)[0])
+    except Exception:
+        log.exception("No se pudo mirar si la carpeta tiene archivos")
+        return None
+
+
+def _que_hay(tenant_id):
+    """Qué carpetas tienen archivos: ([empresas con 'con_archivos'], ¿hay sin identificar?, ¿no se pudo leer nada?)."""
+    ahora = time.monotonic()
+    guardado = _memoria.get(tenant_id)
+    if guardado and ahora - guardado[0] < SEGUNDOS_MEMORIA:
+        return guardado[1]
+    storage = storage_para_tenant(tenant_id)
+    empresas = obtener_empresas_con_carpetas(tenant_id)
+    sin_id = obtener_carpeta_sin_identificar(tenant_id)
+    tareas = [(e["id"], clave, e[clave]) for e in empresas for clave in CARPETAS if e[clave]]
+    if sin_id:
+        tareas.append(("sin-identificar", "sin-identificar", sin_id))
+    with ThreadPoolExecutor(max_workers=8) as pool:   # varias carpetas a la vez, para que no se note la espera
+        resultados = list(pool.map(lambda t: _tiene_archivos(storage, t[2]), tareas)) if storage else []
+    hay = {(t[0], t[1]): r for t, r in zip(tareas, resultados)}
+    visibles = []
+    for e in empresas:
+        con = [clave for clave in CARPETAS if e[clave] and hay.get((e["id"], clave)) is not False]
+        if con:
+            visibles.append({**e, "con_archivos": con})
+    sin_identificar = bool(sin_id) and hay.get(("sin-identificar", "sin-identificar")) is not False
+    error = bool(resultados) and all(r is None for r in resultados)
+    datos = (visibles, sin_identificar, error)
+    _memoria[tenant_id] = (ahora, datos)
+    return datos
+
+
 @bp_archivos.route("/archivos")
 @login_requerido
 def inicio():
     tenant_id = session["tenant_id"]
     conectado = bool(obtener_estado_conexiones(tenant_id)["almacenamiento"])
-    return render_template_string(
-        PLANTILLA_INICIO, conectado=conectado, carpetas=CARPETAS,
-        empresas=obtener_empresas_con_carpetas(tenant_id) if conectado else [],
-        sin_identificar=bool(conectado and obtener_carpeta_sin_identificar(tenant_id)))
+    empresas, sin_identificar, error = _que_hay(tenant_id) if conectado else ([], False, False)
+    return render_template_string(PLANTILLA_INICIO, conectado=conectado, carpetas=CARPETAS, empresas=empresas,
+                                  sin_identificar=sin_identificar, error=error)
 
 
 @bp_archivos.route("/archivos/<empresa_id>/<clave>")
