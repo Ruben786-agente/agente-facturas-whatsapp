@@ -696,6 +696,19 @@ def _proveedor_activo(tenant_id, proveedores):
         session.close()
 
 
+def obtener_empresas_con_carpetas(tenant_id):
+    """Empresas-cliente activas de la gestoría con los ids de sus carpetas (para la página Archivos)."""
+    session = _obtener_session()
+    try:
+        return [{"id": e.id, "nombre": e.nombre, "cif_nif": e.cif_nif,
+                 "facturas": e.carpeta_facturas_id, "tickets": e.carpeta_tickets_id,
+                 "revision": e.carpeta_revision_id, "excel": e.carpeta_excel_id}
+                for e in session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, activa=True)
+                .order_by(EmpresaCliente.nombre)]
+    finally:
+        session.close()
+
+
 def listar_empresas_activas(tenant_id):
     session = _obtener_session()
     try:
