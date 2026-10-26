@@ -6,6 +6,7 @@ y corregir a mano una factura en Revisión para añadirla al Excel.
 
 import logging
 
+from validar_cif import comprobar as comprobar_cif
 from io import BytesIO
 
 from flask import Blueprint, request, redirect, session, render_template_string, url_for, flash, send_file
@@ -340,8 +341,10 @@ def _factura_desde_formulario(original, form):
         })
     if not desgloses:
         raise ValueError("Hace falta al menos una fila de desglose.")
-    emisor = {**(original.get("emisor") or {}), "nombre": form.get("emisor_nombre", "").strip(),
-              "cif_nif": form.get("emisor_cif", "").strip()}
+    cif, error_cif = comprobar_cif(form.get("emisor_cif", ""))
+    if error_cif:
+        raise ValueError(error_cif)
+    emisor = {**(original.get("emisor") or {}), "nombre": form.get("emisor_nombre", "").strip(), "cif_nif": cif}
     return {**original, "fecha_factura": form.get("fecha", "").strip(), "num_factura": form.get("numero", "").strip(),
             "total_factura": _numero(form.get("total")), "emisor": emisor, "desgloses": desgloses}
 
