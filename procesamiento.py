@@ -351,7 +351,9 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
         if emisora:
             if forzar_revision:
                 return _a_revision(storage, tenant_id, emisora, nombre, contenido, factura, forzar_revision)
-            if es_ticket(factura):
+            # Una factura emitida por el propio cliente es una VENTA aunque el comprador no tenga NIF (alumnos, particulares):
+            # solo un ticket de verdad (simplificada/TPV) va a Tickets.
+            if factura.get("es_factura_simplificada") or factura.get("formato_ticket_tpv"):
                 return _guardar_ticket(storage, tenant_id, emisora, nombre, contenido, factura)
             return _guardar_factura(storage, tenant_id, emisora, nombre, contenido, factura)
 
