@@ -54,7 +54,7 @@ PLANTILLA_INICIO = pagina("Archivos", """
   {% else %}
   <div class="tarjetas" id="tarjetas">
     {% for e in empresas %}
-    <div class="tarjeta" data-tarjeta>
+    <div class="tarjeta" data-tarjeta id="c-{{ e.id }}">
       <h3>{{ e.nombre }}</h3><span class="cif">{{ e.cif_nif }}</span>
       <div class="enlaces">
         {% for clave in e.con_archivos %}<a class="btn" data-k="{{ e.id }}|{{ clave }}" href="{{ url_for('archivos.carpeta', empresa_id=e.id, clave=clave) }}">{{ carpetas[clave] }}</a>{% endfor %}
@@ -85,7 +85,8 @@ PLANTILLA_INICIO = pagina("Archivos", """
 
 PLANTILLA_CARPETA = pagina("Archivos", """
 <main class="pagina">
-  <p class="migas"><a href="{{ url_for('archivos.inicio') }}">Archivos</a> › {{ cliente }}</p>
+  <p class="migas"><a class="btn discreto" href="{{ url_for('archivos.inicio') }}{% if empresa_id != 'sin-identificar' %}#c-{{ empresa_id }}{% endif %}" aria-label="Volver a Archivos" style="margin-right:10px;">← Volver</a>
+    <a href="{{ url_for('archivos.inicio') }}">Archivos</a> › {{ cliente }}</p>
   <h1 style="font-size:34px;">{{ titulo }}</h1>
   {% if error %}<p class="alerta error" role="alert" style="margin-top:20px;">{{ error }}</p>
   {% elif archivos %}

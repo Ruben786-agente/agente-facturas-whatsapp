@@ -199,13 +199,17 @@ PLANTILLA_PANEL = pagina("Panel", """
     <div class="seccion-cab"><h2>{% if periodicidad == "mensual" %}Excel del mes por cliente{% else %}Excel del trimestre por cliente{% endif %}</h2>
       {% if periodos %}
       <form method="get"><label for="t" style="display:inline;margin:0 8px 0 0;">{% if periodicidad == "mensual" %}Mes{% else %}Trimestre{% endif %}</label>
-        <select id="t" name="t" onchange="this.form.submit()">
+        <select id="t" name="t" onchange="try { sessionStorage.setItem('posPanel', String(window.scrollY)); } catch (e) {} this.form.submit()">
           {% if periodicidad != "mensual" %}<option value="">Todos</option>{% endif %}
           {% for clave, etiqueta in periodos %}<option value="{{ clave }}" {% if periodo_activo == clave %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}
         </select>
       </form>
       {% endif %}
     </div>
+    <script>
+      // Al cambiar de mes la página se recarga: se vuelve al punto donde estaba, sin tener que bajar de nuevo.
+      try { var pos = sessionStorage.getItem('posPanel'); if (pos !== null) { sessionStorage.removeItem('posPanel'); window.scrollTo(0, parseInt(pos, 10) || 0); } } catch (e) {}
+    </script>
     {% if clientes %}
     <div class="tabla"><table class="apilable">
       <tr><th>Cliente</th>{% if periodicidad != "mensual" %}<th>Trimestre</th>{% endif %}<th class="num">Facturas</th><th class="num">Total</th><th class="num">Tickets</th><th class="num">En revisión</th><th>Estado</th><th>Excel</th></tr>
