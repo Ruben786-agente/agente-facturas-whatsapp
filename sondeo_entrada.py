@@ -28,6 +28,7 @@ from basededatos import (crear_aviso, guardar_carpetas_entrada, obtener_carpetas
                          proveedor_almacenamiento_activo, registrar_intento_fallido, tenants_con_almacenamiento)
 from onboarding import CARPETA_RAIZ
 from procesamiento import procesar_archivo
+from extraccion_ia import ServicioIANoDisponible
 
 log = logging.getLogger("sondeo_entrada")
 
@@ -168,6 +169,13 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
                 # El archivo ya está tratado y su huella guardada: si no se pudo mover, la próxima vez no se vuelve a pagar la IA.
                 log.exception("Entrada %s: tratado '%s' pero no se pudo mover a Procesados", tenant_id, archivo.nombre)
             resumen["procesados"] += 1
+        except ServicioIANoDisponible:
+            # Sin saldo o caída del servicio de IA: el archivo se queda en Entrada y no cuenta como fallo. Se para el ciclo.
+            resumen["pendientes"] += 1
+            crear_aviso(tenant_id, "ia_no_disponible",
+                        "El servicio de lectura de facturas no está disponible en este momento. No se ha perdido nada: sus documentos "
+                        "siguen en la carpeta Entrada y se leerán solos en cuanto se recupere. Si el aviso dura más de un día, escríbanos.")
+            break
         except Exception as e:
             intentos = registrar_intento_fallido(tenant_id, f"entrada:{archivo.id}", f"{type(e).__name__}: {e}")
             resumen["fallidos"] += 1

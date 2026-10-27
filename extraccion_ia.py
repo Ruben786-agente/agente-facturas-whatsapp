@@ -111,7 +111,19 @@ def _extraer_json(texto: str) -> dict:
     raise json.JSONDecodeError("No hay ningún objeto JSON en la respuesta", texto, 0)
 
 
-def _respuesta_por_defecto(motivo: str) -> dict:
+class ServicioIANoDisponible(Exception):
+    """La IA no está disponible (sin saldo, caída...). El documento no se toca: se reintentará solo cuando vuelva."""
+
+
+def _es_error_de_servicio(e) -> bool:
+    """Fallo del servicio de IA (sin saldo, límite de uso, caída, red...), no un problema del documento."""
+    if isinstance(e, (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.InternalServerError,
+                      anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return True
+    return "credit balance" in str(e).lower() or getattr(e, "status_code", None) in (429, 500, 502, 503, 529)
+
+
+def _respuesta_por_defecto(motivo: str, servicio: bool = False) -> dict:
     """Si algo falla nunca se frena el proceso: confianza 'baja' y es_documento_fiscal True,
     para que el documento llegue a una carpeta de revisión y no se pierda."""
     log.warning("Extracción con IA no fiable (%s) -- se envía a revisión manual", motivo)
@@ -123,7 +135,7 @@ def _respuesta_por_defecto(motivo: str) -> dict:
                        "cuota_recargo": None, "pct_retencion": None, "cuota_retencion": None}],
         "total_factura": 0, "confianza": "baja",
         "es_factura_simplificada": False, "sin_cif_destinatario": True, "formato_ticket_tpv": False,
-        "_lectura_fallida": True,
+        "_lectura_fallida": True, "_error_servicio": servicio,
     }
 
 
@@ -180,7 +192,7 @@ def _leer(contenido: bytes, modelo=None) -> dict:
     except json.JSONDecodeError:
         return _respuesta_por_defecto("la IA no devolvió un JSON válido")
     except anthropic.APIError as e:
-        return _respuesta_por_defecto(f"error de la API de Claude: {e}")
+        return _respuesta_por_defecto(f"error de la API de Claude: {e}", servicio=_es_error_de_servicio(e))
     except Exception as e:
         return _respuesta_por_defecto(f"error inesperado: {e}")
 

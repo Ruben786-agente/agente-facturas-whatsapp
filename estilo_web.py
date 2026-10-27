@@ -144,6 +144,7 @@ BARRA = (
     '<a href="{{ url_for(\'panel.panel\') }}" {% if activa == \'panel\' %}class="activa" aria-current="page"{% endif %}>Panel</a>'
     '<a href="{{ url_for(\'subida.subir\') }}" {% if activa == \'subir\' %}class="activa" aria-current="page"{% endif %}>Subir facturas</a>'
     '<a href="{{ url_for(\'archivos.inicio\') }}" {% if activa == \'archivos\' %}class="activa" aria-current="page"{% endif %}>Archivos</a>'
+    '<a href="{{ url_for(\'clientes.lista\') }}" {% if activa == \'clientes\' %}class="activa" aria-current="page"{% endif %}>Clientes</a>'
     '<a href="{{ url_for(\'alta.conexiones\') }}" {% if activa == \'conexiones\' %}class="activa" aria-current="page"{% endif %}>Conexiones y suscripción</a>'
     '</nav>'
     '<div class="usuario"><span class="nombre">{{ gestoria_nombre or "" }}</span>'

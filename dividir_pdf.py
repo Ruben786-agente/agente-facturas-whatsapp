@@ -17,7 +17,7 @@ import os
 import anthropic
 from pypdf import PdfReader, PdfWriter
 
-from extraccion_ia import MODELO, _extraer_json
+from extraccion_ia import MODELO, _extraer_json, ServicioIANoDisponible, _es_error_de_servicio
 
 # Modelo para averiguar dónde empieza y acaba cada factura de un PDF (opcional; por defecto el principal).
 MODELO_DIVISION = os.environ.get("MODELO_DIVISION", "").strip() or MODELO
@@ -96,7 +96,12 @@ def detectar_documentos(contenido: bytes, total_paginas: int) -> list:
             log.warning("División incoherente (%r); se trata cada página por separado", texto[:200])
             return por_paginas
         return grupos
-    except (json.JSONDecodeError, anthropic.APIError, KeyError, Exception) as e:
+    except anthropic.APIError as e:
+        if _es_error_de_servicio(e):
+            raise ServicioIANoDisponible(str(e))   # sin saldo o caída: no se parte el PDF página a página; se reintenta más tarde
+        log.warning("No se pudo dividir el PDF (%s); se trata cada página por separado", e)
+        return por_paginas
+    except (json.JSONDecodeError, KeyError, Exception) as e:
         log.warning("No se pudo dividir el PDF (%s); se trata cada página por separado", e)
         return por_paginas
 

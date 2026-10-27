@@ -68,7 +68,8 @@ def problemas_factura(factura, hoy=None):
     if factura.get("es_factura_simplificada") or factura.get("formato_ticket_tpv") or factura.get("sin_cif_destinatario"):
         pass                                          # tickets: no llevan al Excel, no se exige CIF del proveedor
     elif not (cif_emisor or "").strip():
-        problemas.append("no se ha leído el CIF del proveedor")
+        if not factura.get("_confirmada_por_persona"):
+            problemas.append("no se ha leído el CIF del proveedor")
     elif comprobar_cif_emisor(cif_emisor)[1]:      # mal formado, incompleto o con el control incorrecto
         problemas.append(f"el NIF/CIF del proveedor no es válido ({_limpia(cif_emisor)}): posible error de lectura")
     cif_comprador = (factura.get("destinatario") or {}).get("cif_nif")

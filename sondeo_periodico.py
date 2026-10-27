@@ -59,7 +59,7 @@ def procesar_archivo(storage, archivo, cliente, facturas_ya_registradas):
     # No es un ticket -> factura completa: Excel del periodo (mes o trimestre) que le corresponde.
     factura = factura_completa
 
-    periodo = periodo_para(cliente["tenant_id"], factura["fecha_factura"])
+    periodo = periodo_para(cliente["tenant_id"], factura["fecha_factura"], cliente["cif_empresa_cliente"])
     nombre_excel = nombre_del_excel(cliente["cif_empresa_cliente"], periodo)
 
     archivo_excel_existente = storage.buscar_archivo_por_nombre(cliente["carpeta_excel_id"], nombre_excel)

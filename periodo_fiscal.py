@@ -6,7 +6,8 @@ from datetime import datetime
 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto",
          "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-PERIODICIDADES = ("mensual", "trimestral")
+PERIODICIDADES = ("mensual", "trimestral", "unico")
+PERIODO_UNICO = "Todas las facturas"   # un solo Excel por cliente, sin dividir por fechas
 PERIODICIDAD_POR_DEFECTO = "mensual"
 
 
@@ -22,15 +23,23 @@ def calcular_periodo_mensual(fecha_factura: str) -> str:
 
 
 def calcular_periodo(fecha_factura: str, periodicidad: str = PERIODICIDAD_POR_DEFECTO) -> str:
+    if periodicidad == "unico":
+        return PERIODO_UNICO
     if periodicidad == "trimestral":
         return calcular_periodo_trimestral(fecha_factura)
     return calcular_periodo_mensual(fecha_factura)
 
 
-def periodo_para(tenant_id, fecha_factura: str) -> str:
-    """El periodo de una factura según la periodicidad que tiene elegida la gestoría."""
-    from basededatos import obtener_periodicidad
-    return calcular_periodo(fecha_factura, obtener_periodicidad(tenant_id))
+def periodo_para(tenant_id, fecha_factura: str, cif_empresa=None) -> str:
+    """El periodo de una factura: el que tenga elegido ese cliente o, si no, el de la gestoría."""
+    from basededatos import periodicidad_efectiva
+    return calcular_periodo(fecha_factura, periodicidad_efectiva(tenant_id, cif_empresa))
+
+
+def periodo_efectivo(tenant_id, cif_empresa, periodo: str) -> str:
+    """Si ese cliente lleva un solo Excel sin dividir por fechas, el «periodo» de su Excel es siempre el mismo."""
+    from basededatos import periodicidad_efectiva
+    return PERIODO_UNICO if periodicidad_efectiva(tenant_id, cif_empresa) == "unico" else periodo
 
 
 def periodo_a_slug(periodo: str) -> str:

@@ -168,11 +168,12 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
     <section class="paso opcional">
       <span class="n">+</span>
       <h3>Excel de sus clientes</h3>
-      <p class="que">¿Cada cuánto saca usted el Excel? El agente crea un archivo por cliente y periodo. Si lo retira de la carpeta para importarlo, las facturas siguientes irán a uno nuevo, y las que ya había leído no se repiten.</p>
+      <p class="que">¿Cada cuánto saca usted el Excel? El agente crea un archivo por cliente y periodo. Puede cambiarlo cliente a cliente en la pantalla <a href="{{ url_for('clientes.lista') }}">Clientes</a>. Si lo retira de la carpeta para importarlo, las facturas siguientes irán a uno nuevo, y las que ya había leído no se repiten.</p>
       <form method="post" action="{{ url_for('alta.cambiar_periodicidad') }}" class="estado-linea">
         <select name="periodicidad" aria-label="Periodicidad del Excel" style="max-width:220px;">
           <option value="mensual" {% if periodicidad == "mensual" %}selected{% endif %}>Un Excel al mes</option>
           <option value="trimestral" {% if periodicidad == "trimestral" %}selected{% endif %}>Un Excel al trimestre</option>
+          <option value="unico" {% if periodicidad == "unico" %}selected{% endif %}>Un solo Excel por cliente, con todas las fechas</option>
         </select>
         <button class="btn" type="submit">Guardar</button>
       </form>
@@ -259,7 +260,7 @@ def conexiones():
 def cambiar_periodicidad():
     if guardar_periodicidad(session["tenant_id"], request.form.get("periodicidad", "")):
         return redirect(url_for("alta.conexiones", ok="Guardado. Las próximas facturas irán a un Excel " +
-                                ("trimestral." if request.form.get("periodicidad") == "trimestral" else "mensual.")))
+                                {"trimestral": "trimestral.", "unico": "único por cliente, con todas las fechas."}.get(request.form.get("periodicidad"), "mensual.")))
     return redirect(url_for("alta.conexiones", error="No se ha podido guardar el cambio."))
 
 

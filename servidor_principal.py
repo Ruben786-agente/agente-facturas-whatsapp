@@ -20,6 +20,7 @@ from revision_web import bp_revision
 from publico_web import bp_publico
 from subida_web import bp_subida
 from archivos_web import bp_archivos
+from clientes_web import bp_clientes
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("servidor_principal")
@@ -38,6 +39,7 @@ app.register_blueprint(bp_revision)
 app.register_blueprint(bp_publico)
 app.register_blueprint(bp_subida)
 app.register_blueprint(bp_archivos)
+app.register_blueprint(bp_clientes)
 
 
 @app.errorhandler(GestoriaNoExiste)

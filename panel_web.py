@@ -140,13 +140,6 @@ PLANTILLA_PANEL = pagina("Panel", """
   <section class="cierre"><div><h1>Panel de facturas</h1><p class="sub">Lo que el agente ha leído y lo que necesita que mires.</p></div></section>
   {% endif %}
 
-  {% set foco = plazo or cierre %}
-  {% if foco and foco.sin_facturas %}
-  <p class="sin-envios"><strong>Sin facturas de {% if plazo %}{{ plazo.trimestre }}T {{ plazo.anio }}{% else %}{{ cierre.etiqueta }}{% endif %}:</strong>
-    {% set lista = foco.sin_facturas[:6]|join(", ") %}{{ lista }}{% if foco.sin_facturas|length > 6 %} y {{ foco.sin_facturas|length - 6 }} más{% endif %}{% if not lista.endswith(".") or foco.sin_facturas|length > 6 %}.{% endif %}
-    Todavía no han enviado ninguna factura de {% if plazo %}este trimestre{% else %}este mes{% endif %}.</p>
-  {% endif %}
-
   <section class="cifras" aria-label="Resumen">
     <div class="cifra"><div class="valor">{{ resumen.PROCESADA }}</div><div class="nombre">Procesadas</div><div class="detalle">en el Excel de su cliente</div></div>
     <div class="cifra"><div class="valor">{{ resumen.TICKETS }}</div><div class="nombre">Tickets</div><div class="detalle">archivados aparte</div></div>
@@ -157,6 +150,15 @@ PLANTILLA_PANEL = pagina("Panel", """
       <div class="nombre">Tiempo ahorrado este mes</div><div class="detalle">{{ ahorro.documentos }} facturas × {{ ahorro.minutos_por_doc }} min</div>
     </div>
   </section>
+
+  {% if resumen.ILEGIBLES %}
+  <section class="seccion" style="border-left:4px solid var(--aviso); padding-left:16px;">
+    <p style="margin:0 0 8px;"><strong>{{ resumen.ILEGIBLES }} documento(s) se apartaron como «ilegibles o borrosos».</strong>
+    Si el motivo fue un fallo del servicio de lectura (y no el estado del papel), puede devolverlos a la carpeta Entrada para que se lean de nuevo.</p>
+    <form method="post" action="{{ url_for('revision.reintentar_ilegibles') }}"><button class="btn principal" type="submit"
+      onclick="return confirm('¿Volver a leer estos documentos? Se devolverán a la carpeta Entrada y el agente los leerá de nuevo.');">Volver a leer estos documentos</button></form>
+  </section>
+  {% endif %}
 
   <section class="seccion">
     <div class="seccion-cab"><h2>Qué tiene que revisar</h2>{% if atencion %}<span class="cuenta">{{ atencion|length }}</span>{% endif %}</div>
@@ -172,10 +174,12 @@ PLANTILLA_PANEL = pagina("Panel", """
             <span class="sec">{{ p.motivo or "" }}</span></td>
         <td data-label="Acciones"><div class="acciones">
           {% if p.destino == "REVISION" %}
-            {% if p.corregible %}<a class="btn principal" href="{{ url_for('revision.corregir', factura_id=p.id) }}">Corregir y añadir al Excel</a>{% endif %}
+            {% if p.corregible %}<form class="en-linea aparte" method="post" action="{{ url_for('revision.aceptar', factura_id=p.id) }}"><button class="btn principal" type="submit"
+              onclick="return confirm('¿Añadir al Excel tal como la ha leído el agente? Compruebe antes con «Ver factura» que los datos son correctos.');">Añadir al Excel tal cual</button></form>
+            <a class="btn" href="{{ url_for('revision.corregir', factura_id=p.id) }}">Corregir y añadir</a>{% endif %}
             <a class="btn" href="{{ url_for('revision.ver_revision', factura_id=p.id) }}" target="_blank" rel="noopener">Ver factura</a>
             <a class="btn discreto" href="{{ url_for('revision.abrir_revision', factura_id=p.id) }}" target="_blank" rel="noopener">Abrir carpeta</a>
-            <form class="en-linea aparte" method="post" action="{{ url_for('revision.revisada', factura_id=p.id) }}"><button class="btn discreto" type="submit" onclick="return confirm('¿Marcar como gestionada? Desaparecerá de esta lista y no se añadirá al Excel.');">Marcar como gestionada</button></form>
+            <form class="en-linea aparte" method="post" action="{{ url_for('revision.revisada', factura_id=p.id) }}"><button class="btn discreto" type="submit" onclick="return confirm('Esto quita la factura de la lista SIN añadirla al Excel. ¿Seguro?');">Quitar de la lista (sin añadir)</button></form>
           {% else %}
             <a class="btn principal" href="{{ url_for('revision.asignar', documento_id=p.id) }}">Asignar a un cliente</a>
             <a class="btn" href="{{ url_for('revision.ver_sin_identificar', documento_id=p.id) }}" target="_blank" rel="noopener">Ver documento</a>
@@ -185,7 +189,7 @@ PLANTILLA_PANEL = pagina("Panel", """
       </tr>
       {% endfor %}
     </table></div>
-    <p class="nota">«Marcar como gestionada» quita la línea de esta lista, sin añadirla al Excel, cuando ya la ha resuelto por su cuenta. «Corregir y añadir al Excel» le deja arreglar los datos y la anota en el Excel del {{ 'mes' if periodicidad == 'mensual' else 'trimestre' }}.</p>
+    <p class="nota">«Añadir al Excel tal cual» da por buena la lectura del agente. «Corregir y añadir» le deja arreglar los datos antes. «Quitar de la lista» solo retira la línea, sin añadirla al Excel, cuando ya la ha resuelto por su cuenta.</p>
     {% else %}
     <div class="vacio"><strong>No hay nada pendiente.</strong>Si una factura necesita su revisión, aparecerá aquí.</div>
     {% endif %}

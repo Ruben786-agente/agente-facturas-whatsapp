@@ -139,7 +139,7 @@ def _procesar_mensaje(phone_number_id, mensaje):
         log.info("Factura de WhatsApp sin empresa-cliente identificada -> carpeta sin identificar")
         return
 
-    periodo = periodo_para(tenant["tenant_id"], factura["fecha_factura"])
+    periodo = periodo_para(tenant["tenant_id"], factura["fecha_factura"], empresa["cif_nif"])
     nombre_excel = nombre_del_excel(empresa["cif_nif"], periodo)
     archivo_existente = storage.buscar_archivo_por_nombre(empresa["carpeta_excel_id"], nombre_excel)
     contenido_existente = storage.descargar_archivo(archivo_existente.id) if archivo_existente else None

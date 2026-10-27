@@ -29,12 +29,12 @@ from validar_cif import comprobar as comprobar_cif
 from basededatos import aprender_proveedor, buscar_proveedor_aprendido
 from basededatos import (
     crear_aviso, documento_ya_visto, eliminar_factura_cache, marcar_documento_visto, marcar_revisada,
-    obtener_revision, registrar_sin_identificar, resolver_sin_identificar,
+    obtener_revision, registrar_sin_identificar, resolver_sin_identificar, cliente_quitado,
     guardar_factura_procesada, obtener_carpeta_sin_identificar,
     obtener_facturas_ya_registradas, resolver_empresa_cliente_por_cif,
 )
 from clasificador_documentos import es_ticket, nombre_archivo_destino, procesar_ticket
-from extraccion_ia import extraer_factura, factura_a_ticket_ligero, _detectar_media_type
+from extraccion_ia import extraer_factura, factura_a_ticket_ligero, _detectar_media_type, ServicioIANoDisponible
 from generar_excel_mieos import anadir_factura_a_excel
 from onboarding import alta_empresa_cliente, preparar_gestoria, reparar_empresa
 from periodo_fiscal import periodo_para, nombre_excel as nombre_del_excel
@@ -173,7 +173,7 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, re
             return _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, sospechosa)
 
     try:
-        periodo = periodo_para(tenant_id, factura["fecha_factura"])
+        periodo = periodo_para(tenant_id, factura["fecha_factura"], empresa["cif_nif"])
     except (ValueError, KeyError, TypeError):
         if reintento:
             return {"accion": "revision", "motivo": "fecha de la factura ilegible"}
@@ -217,6 +217,9 @@ def procesar_documento(storage, tenant_id, contenido, nombre_original, extraer=N
     cuando termine el lote.
     """
     factura = (extraer or extraer_factura)(contenido)
+    if factura.get("_error_servicio"):
+        log.error("El servicio de IA no está disponible (¿sin saldo en Anthropic?): el documento '%s' se deja sin tocar", nombre_original)
+        raise ServicioIANoDisponible(nombre_original)
     if not factura.get("es_documento_fiscal", True):
         return {"accion": "ignorado"}
     try:
@@ -340,6 +343,18 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
     destinatario = factura.get("destinatario") or {}
     cif = _normaliza_cif(destinatario.get("cif_nif"))
 
+    # Factura EMITIDA por un cliente de la gestoría (una venta suya): el comprador es un cliente de SU cliente, no de la gestoría.
+    # Se archiva en el cliente emisor (hoja VENTAS) y no se da de alta al comprador.
+    emisor_cif = _normaliza_cif((factura.get("emisor") or {}).get("cif_nif"))
+    if emisor_cif and emisor_cif != cif and not (cif and resolver_empresa_cliente_por_cif(tenant_id, [cif])):
+        emisora = resolver_empresa_cliente_por_cif(tenant_id, [emisor_cif])
+        if emisora:
+            if forzar_revision:
+                return _a_revision(storage, tenant_id, emisora, nombre, contenido, factura, forzar_revision)
+            if es_ticket(factura):
+                return _guardar_ticket(storage, tenant_id, emisora, nombre, contenido, factura)
+            return _guardar_factura(storage, tenant_id, emisora, nombre, contenido, factura)
+
     ticket_de_verdad = factura.get("es_factura_simplificada") or factura.get("formato_ticket_tpv")
     if (not cif or not _cif_valido(cif)) and not ticket_de_verdad and not factura.get("_lectura_fallida") \
             and (factura.get("num_factura") or factura.get("total_factura")):
@@ -366,6 +381,9 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
     if control_nif_cif_correcto(cif) is False and not resolver_empresa_cliente_por_cif(tenant_id, [cif]):
         # Un dígito mal leído crearía una empresa fantasma y archivaría la factura donde no toca: se aparta para revisarla.
         return _sin_identificar(storage, tenant_id, nombre, contenido, "CIF del comprador con dígito de control incorrecto (posible error de lectura)")
+
+    if cliente_quitado(tenant_id, cif):
+        return _sin_identificar(storage, tenant_id, nombre, contenido, "el comprador es un cliente que usted quitó de la lista")
 
     # El CIF ya normalizado se usa también dentro de la factura, para que coincida con el de la empresa.
     factura = {**factura, "destinatario": {**destinatario, "cif_nif": cif}}
@@ -465,6 +483,8 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
             res = procesar_documento(storage, tenant_id, parte, nombre_parte, extraer=extraer, diferir_dudosas=True)
             if res.get("accion") != "en_espera" and not res.get("lectura_fallida"):
                 marcar_documento_visto(tenant_id, huella)
+        except ServicioIANoDisponible:
+            raise   # se para todo el archivo: lo ya leído queda marcado como visto y el resto se lee cuando vuelva el servicio
         except Exception as e:
             log.exception("Fallo procesando %s de '%s'", rango, nombre_original)
             primer_error = primer_error or e
@@ -551,6 +571,7 @@ def reprocesar_revision(storage, tenant_id, factura_id, factura):
     # La ha revisado una persona: ya no valen la duda de la IA ni el motivo que la mandó a Revisión (p. ej. «las dos lecturas no coinciden»).
     factura = {k: v for k, v in factura.items() if k not in ("_motivo_revision", "relectura")}
     factura["confianza"] = "alta"
+    factura["_confirmada_por_persona"] = True   # una persona ha mirado la factura: p. ej. vale que el proveedor no lleve CIF
     res = _guardar_factura(storage, tenant_id, empresa, original, contenido, factura, reintento=True)
     if res["accion"] == "procesada":
         try:  # el CIF que la persona ha escrito o corregido se recuerda para la próxima factura de ese proveedor

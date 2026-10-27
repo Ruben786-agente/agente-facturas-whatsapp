@@ -12,6 +12,7 @@ from basededatos import (correo_ya_procesado, crear_aviso, guardar_estado_correo
 from lector_gmail import LectorGmail
 from lector_outlook import LectorOutlook
 from procesamiento import procesar_archivo
+from extraccion_ia import ServicioIANoDisponible
 
 log = logging.getLogger("sondeo_correo")
 
@@ -62,6 +63,14 @@ def _procesar_tenant(tenant_id, lector=None, storage=None):
                 log.info("Correo %s: '%s' -> %s", tenant_id, nombre, [(r or {}).get("accion") for r in resultados])
             marcar_correo_procesado(tenant_id, mensaje_id)
             max_ok = max(max_ok or 0, fecha)
+        except ServicioIANoDisponible:
+            # Sin saldo o caída de la IA: el correo no cuenta como fallo; se vuelve a mirar en el siguiente ciclo.
+            crear_aviso(tenant_id, "ia_no_disponible",
+                        "El servicio de lectura de facturas no está disponible en este momento. No se ha perdido nada: sus documentos "
+                        "siguen en la carpeta Entrada y se leerán solos en cuanto se recupere. Si el aviso dura más de un día, escríbanos.")
+            f = fecha or punto_actual
+            primer_fallo = f if primer_fallo is None else min(primer_fallo, f)
+            break
         except Exception as e:
             intentos = registrar_intento_fallido(tenant_id, mensaje_id, f"{type(e).__name__}: {e}")
             f = fecha or punto_actual

@@ -76,6 +76,7 @@ class EmpresaCliente(Base):
     carpeta_revision_id = Column(String, nullable=False)
     carpeta_excel_id = Column(String, nullable=False)
     activa = Column(Boolean, nullable=False, default=True)
+    periodicidad = Column(String)   # None = como el resto de la gestoría; o 'mensual' / 'trimestral' / 'unico'
     creada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -261,6 +262,13 @@ def _anadir_columnas_nuevas(motor):
                 conexion.execute(text("ALTER TABLE gestorias ADD COLUMN periodicidad VARCHAR NOT NULL DEFAULT 'mensual'"))
     except Exception:
         log.exception("No se pudo añadir la columna periodicidad a las gestorías")
+    try:
+        columnas = {c["name"] for c in inspect(motor).get_columns("empresas_cliente")}
+        if "periodicidad" not in columnas:
+            with motor.begin() as conexion:
+                conexion.execute(text("ALTER TABLE empresas_cliente ADD COLUMN periodicidad VARCHAR"))
+    except Exception:
+        log.exception("No se pudo añadir la columna periodicidad a los clientes")
 
 
 def _normalizar_url(url):
@@ -973,6 +981,89 @@ def obtener_periodicidad(tenant_id):
         session.close()
 
 
+def obtener_periodicidad_cliente(tenant_id, cif_empresa):
+    """Lo que tiene elegido ese cliente ('mensual', 'trimestral', 'unico') o None si sigue lo de la gestoría."""
+    from periodo_fiscal import PERIODICIDADES
+    if not cif_empresa:
+        return None
+    session = _obtener_session()
+    try:
+        e = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=cif_empresa.strip().upper()).first()
+        valor = e.periodicidad if e else None
+        return valor if valor in PERIODICIDADES else None
+    finally:
+        session.close()
+
+
+def periodicidad_efectiva(tenant_id, cif_empresa=None):
+    return obtener_periodicidad_cliente(tenant_id, cif_empresa) or obtener_periodicidad(tenant_id)
+
+
+def listar_clientes(tenant_id):
+    """Todos los clientes activos de la gestoría, con su ajuste de Excel (para la pantalla Clientes)."""
+    session = _obtener_session()
+    try:
+        return [{"id": e.id, "nombre": e.nombre, "cif_nif": e.cif_nif, "periodicidad": e.periodicidad or ""}
+                for e in session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, activa=True).order_by(EmpresaCliente.nombre)]
+    finally:
+        session.close()
+
+
+def guardar_periodicidad_cliente(tenant_id, empresa_id, periodicidad):
+    """periodicidad '' = como el resto de la gestoría."""
+    from periodo_fiscal import PERIODICIDADES
+    if periodicidad and periodicidad not in PERIODICIDADES:
+        return False
+    session = _obtener_session()
+    try:
+        e = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, id=empresa_id, activa=True).first()
+        if not e:
+            return False
+        e.periodicidad = periodicidad or None
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def quitar_cliente(tenant_id, empresa_id):
+    """Quita un cliente de la lista (no borra sus carpetas ni sus archivos, ni su historial). Si vuelve a llegar una factura con
+    su CIF como comprador, irá a «Sin identificar» en vez de darlo de alta otra vez. Olvida también los documentos «ya vistos»,
+    para poder volver a subir ahora mismo lo que se había leído mal."""
+    session = _obtener_session()
+    try:
+        e = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, id=empresa_id, activa=True).first()
+        if not e:
+            return None
+        e.activa = False
+        session.query(DocumentoVisto).filter_by(tenant_id=tenant_id).delete()
+        session.commit()
+        return e.nombre
+    finally:
+        session.close()
+
+
+def reactivar_cliente(tenant_id, cif):
+    session = _obtener_session()
+    try:
+        e = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=(cif or "").strip().upper(), activa=False).first()
+        if not e:
+            return None
+        e.activa = True
+        session.commit()
+        return e.nombre
+    finally:
+        session.close()
+
+
+def cliente_quitado(tenant_id, cif):
+    session = _obtener_session()
+    try:
+        return session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=(cif or "").strip().upper(), activa=False).first() is not None
+    finally:
+        session.close()
+
+
 def guardar_periodicidad(tenant_id, periodicidad):
     from periodo_fiscal import PERIODICIDADES
     if periodicidad not in PERIODICIDADES:
@@ -1010,13 +1101,15 @@ def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
     from datetime import date
     from periodo_fiscal import MESES
     periodicidad = obtener_periodicidad(tenant_id)
+    if periodicidad == "unico":
+        periodicidad = "mensual"   # un solo Excel por cliente; en el panel las facturas se siguen agrupando por mes
     mensual = periodicidad == "mensual"
     session = _obtener_session()
     try:
         filas = (
             session.query(FacturaCache, EmpresaCliente.nombre, EmpresaCliente.cif_nif)
             .join(EmpresaCliente, FacturaCache.empresa_cliente_id == EmpresaCliente.id)
-            .filter(FacturaCache.tenant_id == tenant_id)
+            .filter(FacturaCache.tenant_id == tenant_id, EmpresaCliente.activa == True)  # noqa: E712
             .order_by(FacturaCache.procesada_en.desc())
             .all()
         )
@@ -1057,6 +1150,7 @@ def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
         sin_id = (session.query(DocumentoSinIdentificar).filter_by(tenant_id=tenant_id)
                   .order_by(DocumentoSinIdentificar.registrado_en.desc()).all())
         resumen["SIN_IDENTIFICAR"] = len(sin_id)
+        resumen["ILEGIBLES"] = sum(1 for d in sin_id if d.motivo == MOTIVO_ILEGIBLE)
         for d in sin_id:
             atencion.append({
                 "id": d.id, "empresa": "(sin identificar)",
@@ -1406,6 +1500,19 @@ def registrar_sin_identificar(tenant_id, nombre_archivo, motivo):
     try:
         session.add(DocumentoSinIdentificar(tenant_id=tenant_id, nombre_archivo=nombre_archivo, motivo=motivo))
         session.commit()
+    finally:
+        session.close()
+
+
+MOTIVO_ILEGIBLE = "documento ilegible o borroso"
+
+
+def listar_sin_identificar_ilegibles(tenant_id, limite=300):
+    session = _obtener_session()
+    try:
+        filas = (session.query(DocumentoSinIdentificar).filter_by(tenant_id=tenant_id, motivo=MOTIVO_ILEGIBLE)
+                 .order_by(DocumentoSinIdentificar.registrado_en).limit(limite).all())
+        return [{"id": d.id, "nombre_archivo": d.nombre_archivo, "motivo": d.motivo} for d in filas]
     finally:
         session.close()
 

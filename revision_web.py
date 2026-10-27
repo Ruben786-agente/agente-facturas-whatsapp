@@ -15,10 +15,10 @@ from almacenamiento_tenant import storage_para_tenant
 from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_carpeta_sin_identificar,
                          obtener_revision, resolver_sin_identificar, resolver_empresa_cliente_por_cif,
                          listar_proveedores_aprendidos, olvidar_proveedor_aprendido,
-                         obtener_sin_identificar, listar_empresas_activas)
+                         obtener_sin_identificar, listar_empresas_activas, listar_sin_identificar_ilegibles)
 from estilo_web import pagina
 from panel_web import login_requerido
-from periodo_fiscal import nombres_excel_posibles
+from periodo_fiscal import nombres_excel_posibles, periodo_efectivo
 from procesamiento import reprocesar_revision, asignar_sin_identificar
 from clasificador_documentos import nombre_archivo_destino
 
@@ -131,6 +131,79 @@ def ver_revision(factura_id):
                      download_name=nombre or "factura")
 
 
+@bp_revision.route("/sin-identificar/reintentar", methods=["POST"])
+@login_requerido
+def reintentar_ilegibles():
+    """Devuelve a la carpeta Entrada lo que se apartó como «ilegible o borroso» (p. ej. porque la IA no estaba disponible) para que se lea de
+    nuevo. Si el PDF original sigue en Entrada/Procesados se devuelve él entero (así se vuelve a dividir bien); si no, las páginas sueltas."""
+    import re
+    from almacenamiento_tenant import proveedor_almacenamiento
+    from sondeo_entrada import asegurar_carpetas
+    tenant_id = session["tenant_id"]
+    docs = listar_sin_identificar_ilegibles(tenant_id)
+    carpeta_sin = obtener_carpeta_sin_identificar(tenant_id)
+    try:
+        storage = _storage(tenant_id)
+        if not docs or not storage or not carpeta_sin:
+            flash("No hay documentos que volver a leer.")
+            return redirect(url_for("panel.panel"))
+        carpetas = asegurar_carpetas(storage, tenant_id, proveedor_almacenamiento(tenant_id))
+        procesados, _ = storage.listar_contenido(carpetas["procesados"])
+        originales = {}
+        devueltos_originales, devueltas_paginas = 0, 0
+        for d in docs:
+            nombre_pagina = nombre_archivo_destino(d["nombre_archivo"], "REVISION", d["motivo"])
+            base = re.sub(r"_p\d+(-\d+)?(\.\w+)?$", "", d["nombre_archivo"])
+            if base not in originales:
+                originales[base] = next((a for a in procesados if re.fullmatch(r"\d{8}-\d{6}_" + re.escape(base) + r"\.\w+", a.nombre)), None)
+                if originales[base] is not None:
+                    ext = originales[base].nombre.rsplit(".", 1)[-1]
+                    storage.mover_o_renombrar(originales[base].id, carpetas["entrada"], f"{base}.{ext}")
+                    devueltos_originales += 1
+            archivo = storage.buscar_archivo_por_nombre(carpeta_sin, nombre_pagina)
+            if originales[base] is not None:
+                if archivo:
+                    storage.eliminar_archivo(archivo.id)   # la página suelta sobra: se vuelve a leer el PDF entero
+            elif archivo:
+                storage.mover_o_renombrar(archivo.id, carpetas["entrada"], d["nombre_archivo"])
+                devueltas_paginas += 1
+            resolver_sin_identificar(tenant_id, d["id"])
+    except Exception:
+        log.exception("No se pudieron devolver los documentos a Entrada")
+        flash("No se ha podido completar. Compruebe que el almacenamiento sigue conectado en Conexiones e inténtelo de nuevo.")
+        return redirect(url_for("panel.panel"))
+    flash(f"Hecho: {devueltos_originales + devueltas_paginas} archivo(s) devueltos a la carpeta Entrada. Se leerán de nuevo en unos minutos.")
+    return redirect(url_for("panel.panel"))
+
+
+@bp_revision.route("/revision/<factura_id>/aceptar", methods=["POST"])
+@login_requerido
+def aceptar(factura_id):
+    """La gestoría da por buena la lectura del agente tal como está y la añade al Excel (sin tener que rellenar el formulario)."""
+    tenant_id = session["tenant_id"]
+    r = obtener_revision(tenant_id, factura_id)
+    if not r or r["destino"] != "REVISION" or not r["datos"] or not r["datos"].get("factura"):
+        flash("Esta factura no se puede añadir desde aquí.")
+        return redirect(url_for("panel.panel"))
+    try:
+        storage = _storage(tenant_id)
+        if not storage:
+            raise RuntimeError("No hay almacenamiento conectado")
+        res = reprocesar_revision(storage, tenant_id, factura_id, r["datos"]["factura"])
+    except Exception:
+        log.exception("Fallo aceptando la factura %s", factura_id)
+        flash("Ha habido un problema al guardar. Inténtelo de nuevo.")
+        return redirect(url_for("panel.panel"))
+    if res["accion"] == "procesada":
+        flash(f"Añadida al Excel de {r['empresa']['nombre']}.")
+    elif res["accion"] == "duplicado_exacto":
+        flash("Esa factura ya estaba anotada; se ha quitado de la lista.")
+    else:
+        flash(f"No se ha podido añadir tal cual ({res.get('motivo') or 'datos incompletos'}). Corríjala a mano.")
+        return redirect(url_for("revision.corregir", factura_id=factura_id))
+    return redirect(url_for("panel.panel"))
+
+
 @bp_revision.route("/sin-identificar/<documento_id>/ver")
 @login_requerido
 def ver_sin_identificar(documento_id):
@@ -206,7 +279,7 @@ def abrir_excel():
     if not empresa or not empresa.get("carpeta_excel_id"):
         return redirect(url_for("panel.panel"))
     carpeta = empresa["carpeta_excel_id"]
-    nombres = nombres_excel_posibles(empresa["cif_nif"], periodo)
+    nombres = nombres_excel_posibles(empresa["cif_nif"], periodo_efectivo(session["tenant_id"], empresa["cif_nif"], periodo))
 
     def enlace(storage):
         for nombre in nombres:
@@ -224,7 +297,7 @@ def descargar_excel():
     empresa = resolver_empresa_cliente_por_cif(session["tenant_id"], [request.args.get("cif", "")])
     if not empresa or not empresa.get("carpeta_excel_id"):
         return redirect(url_for("panel.panel"))
-    nombres = nombres_excel_posibles(empresa["cif_nif"], request.args.get("periodo", ""))
+    nombres = nombres_excel_posibles(empresa["cif_nif"], periodo_efectivo(session["tenant_id"], empresa["cif_nif"], request.args.get("periodo", "")))
     try:
         storage = _storage(session["tenant_id"])
         if not storage:
@@ -444,8 +517,8 @@ def _factura_desde_formulario(original, form):
     if not desgloses:
         raise ValueError("Hace falta al menos una fila de desglose.")
     cif, error_cif = comprobar_cif(form.get("emisor_cif", ""))
-    if error_cif:
-        raise ValueError(error_cif)
+    if error_cif and form.get("emisor_cif", "").strip():
+        raise ValueError(error_cif)     # escrito pero mal; en blanco se admite (hay proveedores que no lo ponen)
     emisor = {**(original.get("emisor") or {}), "nombre": form.get("emisor_nombre", "").strip(), "cif_nif": cif}
     return {**original, "fecha_factura": form.get("fecha", "").strip(), "num_factura": form.get("numero", "").strip(),
             "total_factura": _numero(form.get("total")), "emisor": emisor, "desgloses": desgloses}
