@@ -207,8 +207,16 @@ PLANTILLA_PANEL = pagina("Panel", """
       {% endif %}
     </div>
     <script>
-      // Al cambiar de mes la página se recarga: se vuelve al punto donde estaba, sin tener que bajar de nuevo.
-      try { var pos = sessionStorage.getItem('posPanel'); if (pos !== null) { sessionStorage.removeItem('posPanel'); window.scrollTo(0, parseInt(pos, 10) || 0); } } catch (e) {}
+      // Al cambiar de mes la página se recarga: se vuelve al punto donde estaba. Se espera a que cargue entera, si no aún no hay dónde bajar.
+      (function () {
+        var pos = null;
+        try { pos = sessionStorage.getItem('posPanel'); sessionStorage.removeItem('posPanel'); } catch (e) {}
+        if (pos === null) { return; }
+        pos = parseInt(pos, 10) || 0;
+        try { history.scrollRestoration = 'manual'; } catch (e) {}
+        function ir() { window.scrollTo(0, pos); }
+        window.addEventListener('load', function () { ir(); setTimeout(ir, 60); setTimeout(ir, 250); });
+      })();
     </script>
     {% if clientes %}
     <div class="tabla"><table class="apilable">
