@@ -15,7 +15,7 @@ from almacenamiento_tenant import storage_para_tenant
 from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_carpeta_sin_identificar,
                          obtener_revision, resolver_sin_identificar, resolver_empresa_cliente_por_cif,
                          listar_proveedores_aprendidos, olvidar_proveedor_aprendido,
-                         obtener_sin_identificar, listar_empresas_activas, listar_sin_identificar_ilegibles)
+                         obtener_sin_identificar, listar_empresas_activas, eliminar_tickets_de_empresa, listar_sin_identificar_ilegibles)
 from estilo_web import pagina
 from panel_web import login_requerido
 from periodo_fiscal import nombres_excel_posibles, periodo_efectivo
@@ -226,6 +226,33 @@ def venta_propia(factura_id):
     if res["fallidas"]:
         partes.append(f"{res['fallidas']} no se han podido añadir (revíselas con «Corregir y añadir»)")
     flash(". ".join(partes) + "." if partes else "No se ha podido añadir.")
+    return redirect(url_for("panel.panel"))
+
+
+@bp_revision.route("/tickets/<cif>/devolver", methods=["POST"])
+@login_requerido
+def devolver_tickets(cif):
+    """Devuelve a Entrada los archivos de la carpeta Tickets de un cliente y quita sus tickets de la lista, para que se lean de nuevo
+    (p. ej. facturas del propio cliente que cayeron en Tickets por error)."""
+    from almacenamiento_tenant import proveedor_almacenamiento
+    from sondeo_entrada import asegurar_carpetas
+    tenant_id = session["tenant_id"]
+    empresa = resolver_empresa_cliente_por_cif(tenant_id, [cif])
+    try:
+        storage = _storage(tenant_id)
+        if not empresa or not storage or not empresa.get("carpeta_tickets_id"):
+            flash("No se ha encontrado la carpeta de tickets de ese cliente.")
+            return redirect(url_for("panel.panel"))
+        carpetas = asegurar_carpetas(storage, tenant_id, proveedor_almacenamiento(tenant_id))
+        _, archivos = storage.listar_contenido(empresa["carpeta_tickets_id"])
+        for a in archivos:
+            storage.mover_o_renombrar(a.id, carpetas["entrada"], a.nombre)
+        eliminar_tickets_de_empresa(tenant_id, empresa["id"])
+    except Exception:
+        log.exception("No se pudieron devolver los tickets de %s", cif)
+        flash("No se ha podido completar. Compruebe que el almacenamiento sigue conectado en Conexiones e inténtelo de nuevo.")
+        return redirect(url_for("panel.panel"))
+    flash(f"Hecho: {len(archivos)} archivo(s) de Tickets devueltos a Entrada. Se leerán de nuevo en unos minutos.")
     return redirect(url_for("panel.panel"))
 
 

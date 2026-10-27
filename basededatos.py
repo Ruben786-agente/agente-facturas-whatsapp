@@ -1260,6 +1260,8 @@ def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
                 g["revisadas"] += 1
             elif f.destino == "TICKETS":
                 g["tickets"] += 1
+                if cif and (f.proveedor_cif or "").strip().upper() == cif.strip().upper():
+                    g["ventas_en_tickets"] = g.get("ventas_en_tickets", 0) + 1   # facturas del propio cliente que cayeron en Tickets
             elif f.destino == "REVISION":
                 g["revision"] += 1
                 atencion.append({
@@ -1390,6 +1392,17 @@ def obtener_otra_revision(tenant_id, excluir_id=None):
             if f.id != excluir_id and f.datos_json and '"factura"' in f.datos_json:
                 return f.id
         return None
+    finally:
+        session.close()
+
+
+def eliminar_tickets_de_empresa(tenant_id, empresa_id):
+    """Quita de la lista todos los tickets registrados de una empresa (para volver a leerlos). Devuelve cuántos."""
+    session = _obtener_session()
+    try:
+        n = session.query(FacturaCache).filter_by(tenant_id=tenant_id, empresa_cliente_id=empresa_id, destino="TICKETS").delete()
+        session.commit()
+        return n
     finally:
         session.close()
 

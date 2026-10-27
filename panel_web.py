@@ -231,7 +231,9 @@ PLANTILLA_PANEL = pagina("Panel", """
         {% if periodicidad != "mensual" %}<td data-label="Trimestre">{{ c.etiqueta }}</td>{% endif %}
         <td data-label="Facturas" class="num">{{ c.facturas }}</td>
         <td data-label="Total" class="num">{{ c.total|eur }}</td>
-        <td data-label="Tickets" class="num">{{ c.tickets }}</td>
+        <td data-label="Tickets" class="num">{{ c.tickets }}{% if c.ventas_en_tickets %}<span class="sec">{{ c.ventas_en_tickets }} son facturas del propio cliente</span>
+          <form class="en-linea aparte" method="post" action="{{ url_for('revision.devolver_tickets', cif=c.cif) }}"><button class="btn" type="submit"
+            onclick="return confirm('Se devolverán a Entrada TODOS los archivos de la carpeta Tickets de {{ c.empresa }} y se quitarán sus tickets de la lista, para leerlos de nuevo. ¿Seguro?');">Volver a leer los tickets</button></form>{% endif %}</td>
         <td data-label="En revisión" class="num">{{ c.revision }}</td>
         <td data-label="Estado"><span class="estado {{ c.estado }}">{{ {"LISTO": "Listo para importar", "REVISAR": "Tiene pendientes", "SIN_FACTURAS": "Sin facturas"}[c.estado] }}</span></td>
         <td data-label="Excel">{% if c.facturas %}<div class="acciones"><a class="btn principal" href="{{ url_for('revision.descargar_excel', cif=c.cif, periodo=c.periodo) }}">Descargar Excel</a>
