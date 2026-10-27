@@ -435,6 +435,47 @@ def leer_por_adelantado(contenidos, extraer=None):
         return list(pool.map(una, contenidos))
 
 
+def detectar_cliente_emisor(storage, tenant_id, facturas):
+    """
+    Un lote donde UN mismo emisor firma la mayoría de las facturas y se las manda a varios compradores distintos
+    es el libro de ventas de ese emisor: el emisor es el cliente de la gestoría y los compradores son clientes SUYOS.
+    Si aún no está dado de alta, se da de alta (con aviso) para que sus facturas vayan a su hoja VENTAS
+    y no se creen sus compradores como clientes de la gestoría. Devuelve el CIF dado de alta, o None.
+    Prudencia: hace falta >= 3 facturas, >= la mitad del lote, >= 2 compradores distintos, que ningún comprador sea ya
+    cliente activo (entonces el emisor es un proveedor) y que el emisor no sea un cliente que se quitó a mano.
+    """
+    from collections import Counter, defaultdict
+    docs = [f for f in (facturas or []) if f and not f.get("_lectura_fallida") and f.get("es_documento_fiscal", True)]
+    if len(docs) < 3:
+        return None
+    por_emisor = defaultdict(list)
+    for f in docs:
+        e = _normaliza_cif((f.get("emisor") or {}).get("cif_nif"))
+        if e:
+            por_emisor[e].append(f)
+    for cif_e, fs in sorted(por_emisor.items(), key=lambda kv: -len(kv[1])):
+        if len(fs) < 3 or len(fs) * 2 < len(docs):
+            break
+        if comprobar_cif(cif_e)[1]:
+            continue
+        if resolver_empresa_cliente_por_cif(tenant_id, [cif_e]) or cliente_quitado(tenant_id, cif_e):
+            continue
+        compradores = {_normaliza_cif((f.get("destinatario") or {}).get("cif_nif")) for f in fs} - {"", cif_e}
+        if len(compradores) < 2:
+            continue
+        if any(resolver_empresa_cliente_por_cif(tenant_id, [c]) for c in compradores):
+            continue
+        nombre = Counter((f.get("emisor") or {}).get("nombre", "").strip() for f in fs).most_common(1)[0][0] or cif_e
+        if alta_empresa_cliente(storage, tenant_id, nombre, cif_e).get("nueva"):
+            crear_aviso(tenant_id, "empresa_nueva", f"{nombre} ({cif_e})")
+            crear_aviso(tenant_id, "emisor_detectado",
+                        f"Estas facturas las emite {nombre} ({cif_e}), así que lo hemos dado de alta como cliente y sus facturas van a su hoja de VENTAS; "
+                        "sus compradores no se dan de alta como clientes de la gestoría. Si no es cliente suyo, quítelo en Clientes.")
+            log.info("Emisor %s detectado como cliente por repetirse en el lote", cif_e)
+            return cif_e
+    return None
+
+
 def _huella(contenido):
     return hashlib.sha256(contenido).hexdigest()
 
@@ -506,6 +547,10 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
         except Exception:
             ya_vistas.append(False)
     leidas = leer_por_adelantado([None if v else p for v, p in zip(ya_vistas, partes)], extraer)
+    try:
+        detectar_cliente_emisor(storage, tenant_id, leidas)
+    except Exception:
+        log.exception("No se pudo comprobar si el emisor del lote es un cliente")
 
     resultados, primer_error, en_espera = [], None, []
     for grupo, parte, leida in zip(grupos, partes, leidas):

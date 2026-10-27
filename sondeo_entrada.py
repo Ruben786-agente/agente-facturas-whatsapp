@@ -28,7 +28,7 @@ from almacenamiento_tenant import storage_para_tenant
 from basededatos import (crear_aviso, guardar_carpetas_entrada, obtener_carpetas_entrada, olvidar_carpetas_entrada,
                          documento_ya_visto, proveedor_almacenamiento_activo, registrar_intento_fallido, tenants_con_almacenamiento)
 from onboarding import CARPETA_RAIZ
-from procesamiento import LECTURAS_PARALELAS, procesar_archivo
+from procesamiento import LECTURAS_PARALELAS, detectar_cliente_emisor, procesar_archivo
 from extraccion_ia import ServicioIANoDisponible, extraer_factura
 
 log = logging.getLogger("sondeo_entrada")
@@ -180,9 +180,26 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
             precargas[archivo.id] = None
 
     try:
+        # Se adelanta la lectura de todo el ciclo (con tope de memoria) y, con todo leído, se comprueba si el lote es el libro de
+        # ventas de un cliente (mismo emisor, muchos compradores): en ese caso el emisor se da de alta como cliente ANTES de archivar.
+        acumulado = 0
+        for archivo in a_tratar:
+            if acumulado + archivo.tamano_bytes > 60 * 1024 * 1024:
+                break
+            acumulado += archivo.tamano_bytes
+            _precargar(archivo)
+        leidas = []
+        for previo in precargas.values():
+            if previo and previo[1] is not None:
+                try:
+                    leidas.append(previo[1].result())
+                except Exception:
+                    pass
+        try:
+            detectar_cliente_emisor(storage, tenant_id, leidas)
+        except Exception:
+            log.exception("Entrada %s: no se pudo comprobar si el emisor del lote es un cliente", tenant_id)
         for i, archivo in enumerate(a_tratar):
-            for siguiente in a_tratar[i:i + LECTURAS_PARALELAS]:
-                _precargar(siguiente)
             extension = os.path.splitext(archivo.nombre)[1].lower()
             try:
                 if extension not in EXTENSIONES or archivo.tamano_bytes > MAX_BYTES:

@@ -1476,7 +1476,7 @@ def olvidar_proveedor_aprendido(tenant_id, aprendido_id):
         session.close()
 
 
-TIPOS_AVISO_INFORMATIVO = ("empresa_nueva", "cif_aprendido")  # no son un problema: solo informan de algo que ha hecho el agente
+TIPOS_AVISO_INFORMATIVO = ("empresa_nueva", "cif_aprendido", "emisor_detectado")  # no son un problema: solo informan de algo que ha hecho el agente
 
 
 def marcar_avisos_vistos(tenant_id, grupo=None):
