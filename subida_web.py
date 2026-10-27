@@ -59,10 +59,14 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
   <form id="formulario" method="post" onsubmit="return false;">
     <div class="zona" id="zona">
       <strong>Arrastre los archivos aquí</strong>
-      <p>PDF, fotos (JPG, PNG, HEIC...), ZIP o factura electrónica (XML). Hasta 25 MB cada uno.</p>
-      <label class="btn principal grande" for="archivos" style="margin-top:18px;">Elegir archivos del dispositivo</label>
+      <p>PDF, fotos (JPG, PNG, HEIC...), ZIP o factura electrónica (XML). Hasta 25 MB cada uno. También puede arrastrar una carpeta entera.</p>
+      <div style="margin-top:18px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        <label class="btn principal grande" for="archivos">Elegir archivos</label>
+        <label class="btn grande" for="carpeta">Subir una carpeta entera</label>
+      </div>
     </div>
     <input id="archivos" class="oculto" type="file" multiple accept="{{ aceptar }}">
+    <input id="carpeta" class="oculto" type="file" webkitdirectory multiple>
   </form>
   <ul class="lista" id="lista" aria-live="polite"></ul>
   <p class="tenue" id="resumen" style="margin-top:16px;"></p>
@@ -71,37 +75,71 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
     var zona = document.getElementById('zona'), entrada = document.getElementById('archivos');
     var lista = document.getElementById('lista'), resumen = document.getElementById('resumen');
     var token = (document.querySelector('input[name=csrf_token]') || {}).value || '';
-    var MAX = 25 * 1024 * 1024, cola = [], ocupado = false, subidos = 0, fallidos = 0;
+    var MAX = 25 * 1024 * 1024, cola = [], activos = 0, PARALELO = 3, subidos = 0, fallidos = 0, omitidos = 0;
+    var VALIDAS = '{{ aceptar }}'.split(',');
+    function valida(nombre) { var i = nombre.lastIndexOf('.'); return i > 0 && VALIDAS.indexOf(nombre.slice(i).toLowerCase()) >= 0; }
     ['dragenter', 'dragover'].forEach(function (n) { zona.addEventListener(n, function (e) { e.preventDefault(); zona.classList.add('encima'); }); });
     ['dragleave', 'drop'].forEach(function (n) { zona.addEventListener(n, function (e) { e.preventDefault(); zona.classList.remove('encima'); }); });
-    zona.addEventListener('drop', function (e) { anadir(e.dataTransfer.files); });
+    var carpeta = document.getElementById('carpeta');
+    zona.addEventListener('drop', function (e) {
+      var items = e.dataTransfer.items;
+      if (items && items.length && items[0].webkitGetAsEntry) {
+        var entradas = [];
+        for (var i = 0; i < items.length; i++) { var en = items[i].webkitGetAsEntry(); if (en) { entradas.push(en); } }
+        recoger(entradas);
+      } else { anadir(e.dataTransfer.files); }
+    });
     entrada.addEventListener('change', function () { anadir(entrada.files); entrada.value = ''; });
+    carpeta.addEventListener('change', function () { anadir(carpeta.files); carpeta.value = ''; });
+
+    // Arrastrar carpetas: se recorren (con sus subcarpetas) y se suben los archivos que sirven.
+    function recoger(entradas) {
+      var pendientes = 0, encontrados = [];
+      function fin() { if (pendientes === 0) { anadir(encontrados); } }
+      function visitar(en) {
+        if (en.isFile) {
+          pendientes++;
+          en.file(function (f) { encontrados.push(f); pendientes--; fin(); }, function () { pendientes--; fin(); });
+        } else if (en.isDirectory) {
+          pendientes++;
+          var lector = en.createReader(), todos = [];
+          (function leer() {
+            lector.readEntries(function (lote) {
+              if (lote.length) { todos = todos.concat(Array.prototype.slice.call(lote)); leer(); }
+              else { todos.forEach(visitar); pendientes--; fin(); }
+            }, function () { pendientes--; fin(); });
+          })();
+        }
+      }
+      entradas.forEach(visitar);
+    }
 
     function anadir(archivos) {
       Array.prototype.forEach.call(archivos, function (f) {
+        if (f.name.charAt(0) === '.' || f.name.charAt(0) === '~' || !valida(f.name)) { omitidos++; return; }
         var li = document.createElement('li'), n = document.createElement('span'), s = document.createElement('span');
         n.className = 'nombre'; n.textContent = f.name; s.className = 'estado'; s.textContent = 'En espera';
         li.appendChild(n); li.appendChild(s); lista.appendChild(li);
         if (f.size > MAX) { marcar(li, s, false, 'Pesa más de 25 MB'); return; }
         cola.push({ f: f, li: li, s: s });
       });
-      siguiente();
+      for (var k = 0; k < PARALELO; k++) { siguiente(); }
     }
     function marcar(li, s, bien, texto) {
       li.className = bien ? 'ok' : 'mal'; s.textContent = texto;
       if (bien) { subidos++; } else { fallidos++; }
-      resumen.textContent = subidos ? subidos + ' archivo(s) recibido(s). El agente los procesará en uno o dos minutos y los verá en el panel.' + (fallidos ? ' ' + fallidos + ' con problemas.' : '') : '';
+      resumen.textContent = subidos ? subidos + ' archivo(s) recibido(s). El agente los procesará en uno o dos minutos y los verá en el panel.' + (fallidos ? ' ' + fallidos + ' con problemas.' : '') + (omitidos ? ' ' + omitidos + ' omitido(s) por no ser PDF, imagen, ZIP o XML.' : '') : '';
     }
     function siguiente() {
-      if (ocupado || !cola.length) { return; }
-      ocupado = true;
+      if (activos >= PARALELO || !cola.length) { return; }
+      activos++;
       var t = cola.shift(); t.s.textContent = 'Subiendo...';
       var datos = new FormData(); datos.append('archivo', t.f);
       fetch('{{ url_for("subida.subir_archivo") }}', { method: 'POST', body: datos, headers: { 'X-CSRF-Token': token }, credentials: 'same-origin' })
         .then(function (r) { return r.json().catch(function () { return { ok: false, mensaje: 'Error inesperado' }; }); })
         .then(function (j) { marcar(t.li, t.s, j.ok, j.ok ? 'Recibido' : (j.mensaje || 'No se pudo subir')); })
         .catch(function () { marcar(t.li, t.s, false, 'Sin conexión. Inténtelo de nuevo'); })
-        .then(function () { ocupado = false; siguiente(); });
+        .then(function () { activos--; siguiente(); });
     }
   })();
   </script>

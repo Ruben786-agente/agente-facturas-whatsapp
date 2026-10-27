@@ -12,9 +12,10 @@ Se vigila en OneDrive y en Google Drive (ENTRADA_PROVEEDORES). Con Google Drive,
 ver lo que crea el propio agente, así que allí no sirven los archivos que la gestoría arrastra a mano a la carpeta: se suben
 desde «Subir facturas» del panel (subida_web.py), que los guarda en Entrada a través del agente.
 
-Variables opcionales: ENTRADA_MAX_POR_CICLO (por defecto 15 archivos por gestoría y ciclo), ENTRADA_PROVEEDORES.
+Variables opcionales: ENTRADA_MAX_POR_CICLO (por defecto 30 archivos por gestoría y ciclo), ENTRADA_PROVEEDORES.
 """
 
+import hashlib
 import logging
 import os
 from datetime import datetime, timezone
@@ -25,10 +26,10 @@ from autenticacion_google import ErrorAutorizacionGoogle
 from autenticacion_onedrive import ErrorAutorizacionMicrosoft
 from almacenamiento_tenant import storage_para_tenant
 from basededatos import (crear_aviso, guardar_carpetas_entrada, obtener_carpetas_entrada, olvidar_carpetas_entrada,
-                         proveedor_almacenamiento_activo, registrar_intento_fallido, tenants_con_almacenamiento)
+                         documento_ya_visto, proveedor_almacenamiento_activo, registrar_intento_fallido, tenants_con_almacenamiento)
 from onboarding import CARPETA_RAIZ
-from procesamiento import procesar_archivo
-from extraccion_ia import ServicioIANoDisponible
+from procesamiento import LECTURAS_PARALELAS, procesar_archivo
+from extraccion_ia import ServicioIANoDisponible, extraer_factura
 
 log = logging.getLogger("sondeo_entrada")
 
@@ -129,7 +130,7 @@ def _mover(storage, archivo, carpeta_destino, con_fecha=True):
 
 def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
     """Un ciclo para una gestoría. Devuelve un resumen con los archivos tratados, apartados y pendientes."""
-    max_archivos = max_archivos or int(os.environ.get("ENTRADA_MAX_POR_CICLO", "15"))
+    max_archivos = max_archivos or int(os.environ.get("ENTRADA_MAX_POR_CICLO", "30"))
     carpetas = asegurar_carpetas(storage, tenant_id, proveedor)
     carpetas, archivos = _listar_con_reparacion(storage, tenant_id, proveedor, carpetas)
     archivos = [a for a in archivos if a.nombre.lower() not in IGNORAR and not a.nombre.startswith("~$")]
@@ -137,59 +138,104 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
 
     resumen = {"procesados": 0, "apartados": 0, "fallidos": 0, "pendientes": 0}
     apartados_no_leibles = []
-    tratados = 0
+
+    # 1) Qué archivos se tratan en este ciclo.
+    a_tratar = []
     for archivo in archivos:
         edad = _segundos_desde(archivo.fecha_modificacion)
         if (edad is not None and edad < SEGUNDOS_ASENTAR) or archivo.tamano_bytes == 0:
             resumen["pendientes"] += 1   # aún se está subiendo (o está vacío): se mira en el siguiente ciclo
-            continue
-        if tratados >= max_archivos:
+        elif len(a_tratar) >= max_archivos:
             resumen["pendientes"] += 1
-            continue
-        tratados += 1
-        extension = os.path.splitext(archivo.nombre)[1].lower()
+        else:
+            a_tratar.append(archivo)
+
+    # 2) Lectura con IA por adelantado: mientras se guarda un archivo, ya se están leyendo los siguientes.
+    #    Solo se paraleliza la lectura; guardar, anotar en el Excel y mover siguen siendo de uno en uno.
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=LECTURAS_PARALELAS)
+    precargas = {}
+
+    def _precargar(archivo):
+        if archivo.id in precargas:
+            return
+        precargas[archivo.id] = None
         try:
-            if extension not in EXTENSIONES or archivo.tamano_bytes > MAX_BYTES:
-                motivo = "formato no admitido (use PDF, imagen o ZIP)" if extension not in EXTENSIONES else "pesa demasiado (más de 25 MB)"
-                _mover(storage, archivo, carpetas["no_procesables"])
-                apartados_no_leibles.append(f"{archivo.nombre} ({motivo})")
-                resumen["apartados"] += 1
-                continue
+            ext = os.path.splitext(archivo.nombre)[1].lower()
+            if ext not in EXTENSIONES or archivo.tamano_bytes > MAX_BYTES or archivo.tamano_bytes > 8 * 1024 * 1024:
+                return
             contenido = storage.descargar_archivo(archivo.id)
-            if not _es_lectura_posible(contenido):
-                _mover(storage, archivo, carpetas["no_procesables"])
-                apartados_no_leibles.append(f"{archivo.nombre} (el archivo no se puede leer; si es una foto, guárdela como JPG)")
-                resumen["apartados"] += 1
-                continue
-            resultados = procesar_archivo(storage, tenant_id, contenido, archivo.nombre)
-            log.info("Entrada %s: '%s' -> %s", tenant_id, archivo.nombre, [(r or {}).get("accion") for r in resultados])
+            from formatos import tipo_real
+            import dividir_pdf
+            if tipo_real(contenido) not in ("pdf", "jpg", "png"):
+                precargas[archivo.id] = (contenido, None)
+                return
+            paginas = dividir_pdf.contar_paginas(contenido) if contenido[:4] == b"%PDF" else 0
+            if paginas > 1 or documento_ya_visto(tenant_id, hashlib.sha256(contenido).hexdigest()):
+                precargas[archivo.id] = (contenido, None)   # los PDF de varias páginas ya se leen en paralelo por dentro
+                return
+            precargas[archivo.id] = (contenido, pool.submit(extraer_factura, contenido))
+        except Exception:
+            log.debug("Entrada %s: no se pudo adelantar '%s'", tenant_id, archivo.nombre, exc_info=True)
+            precargas[archivo.id] = None
+
+    try:
+        for i, archivo in enumerate(a_tratar):
+            for siguiente in a_tratar[i:i + LECTURAS_PARALELAS]:
+                _precargar(siguiente)
+            extension = os.path.splitext(archivo.nombre)[1].lower()
             try:
-                _mover(storage, archivo, carpetas["procesados"])
-            except Exception:
-                # El archivo ya está tratado y su huella guardada: si no se pudo mover, la próxima vez no se vuelve a pagar la IA.
-                log.exception("Entrada %s: tratado '%s' pero no se pudo mover a Procesados", tenant_id, archivo.nombre)
-            resumen["procesados"] += 1
-        except ServicioIANoDisponible:
-            # Sin saldo o caída del servicio de IA: el archivo se queda en Entrada y no cuenta como fallo. Se para el ciclo.
-            resumen["pendientes"] += 1
-            crear_aviso(tenant_id, "ia_no_disponible",
-                        "El servicio de lectura de facturas no está disponible en este momento. No se ha perdido nada: sus documentos "
-                        "siguen en la carpeta Entrada y se leerán solos en cuanto se recupere. Si el aviso dura más de un día, escríbanos.")
-            break
-        except Exception as e:
-            intentos = registrar_intento_fallido(tenant_id, f"entrada:{archivo.id}", f"{type(e).__name__}: {e}")
-            resumen["fallidos"] += 1
-            if intentos >= MAX_INTENTOS:
-                log.exception("Entrada %s: '%s' falló %d veces; se aparta", tenant_id, archivo.nombre, intentos)
-                try:
+                if extension not in EXTENSIONES or archivo.tamano_bytes > MAX_BYTES:
+                    motivo = "formato no admitido (use PDF, imagen o ZIP)" if extension not in EXTENSIONES else "pesa demasiado (más de 25 MB)"
                     _mover(storage, archivo, carpetas["no_procesables"])
+                    apartados_no_leibles.append(f"{archivo.nombre} ({motivo})")
+                    resumen["apartados"] += 1
+                    continue
+                previo = precargas.pop(archivo.id, None)
+                contenido, lectura = previo if previo else (storage.descargar_archivo(archivo.id), None)
+                if not _es_lectura_posible(contenido):
+                    _mover(storage, archivo, carpetas["no_procesables"])
+                    apartados_no_leibles.append(f"{archivo.nombre} (el archivo no se puede leer; si es una foto, guárdela como JPG)")
+                    resumen["apartados"] += 1
+                    continue
+                factura_previa = None
+                if lectura is not None:
+                    try:
+                        factura_previa = lectura.result()
+                    except Exception:
+                        log.exception("Entrada %s: lectura adelantada fallida en '%s'; se repite", tenant_id, archivo.nombre)
+                extraer = (lambda _c, f=factura_previa: f) if factura_previa is not None else None
+                resultados = procesar_archivo(storage, tenant_id, contenido, archivo.nombre, extraer=extraer)
+                log.info("Entrada %s: '%s' -> %s", tenant_id, archivo.nombre, [(r or {}).get("accion") for r in resultados])
+                try:
+                    _mover(storage, archivo, carpetas["procesados"])
                 except Exception:
-                    log.exception("Entrada %s: no se pudo apartar '%s'", tenant_id, archivo.nombre)
-                crear_aviso(tenant_id, "entrada_fallida",
-                            f"No se ha podido procesar el archivo «{archivo.nombre}» de la carpeta Entrada después de varios intentos. "
-                            "Lo hemos dejado en Entrada / No procesables: revíselo y, si es una factura, súbala de nuevo o anótela a mano.")
-            else:
-                log.exception("Entrada %s: fallo con '%s' (intento %d de %d)", tenant_id, archivo.nombre, intentos, MAX_INTENTOS)
+                    # El archivo ya está tratado y su huella guardada: si no se pudo mover, la próxima vez no se vuelve a pagar la IA.
+                    log.exception("Entrada %s: tratado '%s' pero no se pudo mover a Procesados", tenant_id, archivo.nombre)
+                resumen["procesados"] += 1
+            except ServicioIANoDisponible:
+                # Sin saldo o caída del servicio de IA: el archivo se queda en Entrada y no cuenta como fallo. Se para el ciclo.
+                resumen["pendientes"] += 1
+                crear_aviso(tenant_id, "ia_no_disponible",
+                            "El servicio de lectura de facturas no está disponible en este momento. No se ha perdido nada: sus documentos "
+                            "siguen en la carpeta Entrada y se leerán solos en cuanto se recupere. Si el aviso dura más de un día, escríbanos.")
+                break
+            except Exception as e:
+                intentos = registrar_intento_fallido(tenant_id, f"entrada:{archivo.id}", f"{type(e).__name__}: {e}")
+                resumen["fallidos"] += 1
+                if intentos >= MAX_INTENTOS:
+                    log.exception("Entrada %s: '%s' falló %d veces; se aparta", tenant_id, archivo.nombre, intentos)
+                    try:
+                        _mover(storage, archivo, carpetas["no_procesables"])
+                    except Exception:
+                        log.exception("Entrada %s: no se pudo apartar '%s'", tenant_id, archivo.nombre)
+                    crear_aviso(tenant_id, "entrada_fallida",
+                                f"No se ha podido procesar el archivo «{archivo.nombre}» de la carpeta Entrada después de varios intentos. "
+                                "Lo hemos dejado en Entrada / No procesables: revíselo y, si es una factura, súbala de nuevo o anótela a mano.")
+                else:
+                    log.exception("Entrada %s: fallo con '%s' (intento %d de %d)", tenant_id, archivo.nombre, intentos, MAX_INTENTOS)
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
     if apartados_no_leibles:
         lista = "; ".join(apartados_no_leibles[:5]) + (f" y {len(apartados_no_leibles) - 5} más" if len(apartados_no_leibles) > 5 else "")

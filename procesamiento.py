@@ -407,6 +407,34 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
     return _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura)
 
 
+LECTURAS_PARALELAS = max(1, int(os.environ.get("LECTURAS_PARALELAS", "4")))
+
+
+def leer_por_adelantado(contenidos, extraer=None):
+    """
+    Lee con IA varios documentos A LA VEZ (máx. LECTURAS_PARALELAS). Solo se paraleliza la lectura:
+    comprobar duplicados, anotar en el Excel y archivar siguen haciéndose de uno en uno y en orden.
+    Devuelve una lista con la factura leída de cada documento (None si esa lectura falló: se leerá
+    de nuevo de forma normal al llegarle el turno).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    leer = extraer or extraer_factura
+
+    def una(c):
+        if c is None:
+            return None
+        try:
+            return leer(c)
+        except Exception:
+            log.exception("Lectura previa fallida; se repetirá en su turno")
+            return None
+
+    if len(contenidos) <= 1 or LECTURAS_PARALELAS <= 1:
+        return [una(c) for c in contenidos]
+    with ThreadPoolExecutor(max_workers=LECTURAS_PARALELAS) as pool:
+        return list(pool.map(una, contenidos))
+
+
 def _huella(contenido):
     return hashlib.sha256(contenido).hexdigest()
 
@@ -470,8 +498,17 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
     base = os.path.splitext(os.path.basename(nombre_original))[0]
     log.info("'%s': %d páginas -> %d documentos", nombre_original, total, len(partes))
 
+    # Las lecturas con IA van varias a la vez; guardar y anotar sigue siendo de una en una, en orden.
+    ya_vistas = []
+    for parte in partes:
+        try:
+            ya_vistas.append(documento_ya_visto(tenant_id, _huella(parte)))
+        except Exception:
+            ya_vistas.append(False)
+    leidas = leer_por_adelantado([None if v else p for v, p in zip(ya_vistas, partes)], extraer)
+
     resultados, primer_error, en_espera = [], None, []
-    for grupo, parte in zip(grupos, partes):
+    for grupo, parte, leida in zip(grupos, partes, leidas):
         rango = f"p{grupo[0]}" if len(grupo) == 1 else f"p{grupo[0]}-{grupo[-1]}"
         nombre_parte = f"{base}_{rango}.pdf"
         try:
@@ -480,7 +517,8 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
                 log.info("'%s' %s: ya leída hace poco, se salta", nombre_original, rango)
                 resultados.append({"accion": "ya_visto"})
                 continue
-            res = procesar_documento(storage, tenant_id, parte, nombre_parte, extraer=extraer, diferir_dudosas=True)
+            extraer_parte = (lambda _c, f=leida: f) if leida is not None else extraer
+            res = procesar_documento(storage, tenant_id, parte, nombre_parte, extraer=extraer_parte, diferir_dudosas=True)
             if res.get("accion") != "en_espera" and not res.get("lectura_fallida"):
                 marcar_documento_visto(tenant_id, huella)
         except ServicioIANoDisponible:
