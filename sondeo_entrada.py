@@ -27,7 +27,7 @@ from autenticacion_google import ErrorAutorizacionGoogle
 from autenticacion_onedrive import ErrorAutorizacionMicrosoft
 from almacenamiento_tenant import storage_para_tenant
 from basededatos import (crear_aviso, guardar_carpetas_entrada, obtener_carpetas_entrada, olvidar_carpetas_entrada,
-                         actualizar_subida, documento_ya_visto, proveedor_almacenamiento_activo, registrar_intento_fallido, tenants_con_almacenamiento)
+                         actualizar_subida, documento_ya_visto, subida_cancelada, proveedor_almacenamiento_activo, registrar_intento_fallido, tenants_con_almacenamiento)
 from onboarding import CARPETA_RAIZ
 from procesamiento import LECTURAS_PARALELAS, detectar_cliente_emisor, procesar_archivo
 from extraccion_ia import ServicioIANoDisponible, extraer_factura
@@ -147,6 +147,12 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
         except Exception:
             log.debug("No se pudo anotar el estado de '%s'", archivo.nombre, exc_info=True)
 
+    def _cancelada(archivo):
+        try:
+            return subida_cancelada(tenant_id, archivo.nombre)
+        except Exception:
+            return False
+
     def _resumen(resultados):
         cuentas = {}
         for r in resultados:
@@ -175,6 +181,8 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
         if archivo.id in precargas:
             return
         precargas[archivo.id] = None
+        if _cancelada(archivo):
+            return
         _estado(archivo, estado="leyendo")
         try:
             ext = os.path.splitext(archivo.nombre)[1].lower()
@@ -218,6 +226,11 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
         for i, archivo in enumerate(a_tratar):
             extension = os.path.splitext(archivo.nombre)[1].lower()
             try:
+                if _cancelada(archivo):
+                    _mover(storage, archivo, carpetas["no_procesables"])
+                    _estado(archivo, estado="cancelado", resumen=json.dumps({"cancelada": 1, "antes_de_empezar": True}))
+                    resumen["apartados"] += 1
+                    continue
                 if extension not in EXTENSIONES or archivo.tamano_bytes > MAX_BYTES:
                     motivo = "formato no admitido (use PDF, imagen o ZIP)" if extension not in EXTENSIONES else "pesa demasiado (más de 25 MB)"
                     _mover(storage, archivo, carpetas["no_procesables"])
@@ -242,15 +255,20 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
                 extraer = (lambda _c, f=factura_previa: f) if factura_previa is not None else None
                 _estado(archivo, estado="guardando")
                 resultados = procesar_archivo(storage, tenant_id, contenido, archivo.nombre, extraer=extraer,
-                                              progreso=lambda fase, hechos, total, a=archivo: _estado(a, estado=fase, hechos=hechos, total=total))
+                                              progreso=lambda fase, hechos, total, a=archivo: _estado(a, estado=fase, hechos=hechos, total=total),
+                                              parar=lambda a=archivo: _cancelada(a))
                 log.info("Entrada %s: '%s' -> %s", tenant_id, archivo.nombre, [(r or {}).get("accion") for r in resultados])
+                canceladas = any((r or {}).get("accion") == "cancelada" for r in resultados)
                 try:
-                    _mover(storage, archivo, carpetas["procesados"])
+                    _mover(storage, archivo, carpetas["no_procesables"] if canceladas else carpetas["procesados"])
                 except Exception:
                     # El archivo ya está tratado y su huella guardada: si no se pudo mover, la próxima vez no se vuelve a pagar la IA.
                     log.exception("Entrada %s: tratado '%s' pero no se pudo mover a Procesados", tenant_id, archivo.nombre)
                 resumen["procesados"] += 1
-                _estado(archivo, estado="terminado", resumen=_resumen(resultados))
+                if canceladas:
+                    _estado(archivo, estado="cancelado", resumen=_resumen(resultados))
+                else:
+                    _estado(archivo, estado="terminado", resumen=_resumen(resultados))
             except ServicioIANoDisponible:
                 # Sin saldo o caída del servicio de IA: el archivo se queda en Entrada y no cuenta como fallo. Se para el ciclo.
                 resumen["pendientes"] += 1

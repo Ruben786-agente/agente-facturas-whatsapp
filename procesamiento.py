@@ -507,7 +507,7 @@ def _procesar_sin_repetir(storage, tenant_id, contenido, nombre_original, extrae
     return res
 
 
-def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=None, dividir=None, progreso=None):
+def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=None, dividir=None, progreso=None, parar=None):
     """
     Punto de entrada para los canales (correo, OneDrive, WhatsApp). Si el archivo es un PDF
     con varias páginas, lo separa en documentos sueltos (un lote escaneado trae varias
@@ -524,7 +524,7 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
         listos, fallidos = formatos.normalizar(nombre_original, contenido)
         resultados = []
         for nombre_n, contenido_n in listos:
-            resultados += procesar_archivo(storage, tenant_id, contenido_n, nombre_n, extraer, dividir, progreso)
+            resultados += procesar_archivo(storage, tenant_id, contenido_n, nombre_n, extraer, dividir, progreso, parar)
         if fallidos:
             motivo = fallidos[0][1] if len(fallidos) == 1 else f"{len(fallidos)} archivos no legibles"
             log.info("'%s': no se pudieron leer %s", nombre_original, fallidos)
@@ -572,6 +572,10 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
 
     resultados, primer_error, en_espera = [], None, []
     for indice, (grupo, parte, leida) in enumerate(zip(grupos, partes, leidas)):
+        if parar and parar():
+            # La gestoría canceló: lo ya anotado se queda; el resto no se toca (y las lecturas hechas no se archivan).
+            resultados.extend({"accion": "cancelada"} for _ in range(len(partes) - indice))
+            break
         if progreso:
             progreso("guardando", indice, len(partes))
         rango = f"p{grupo[0]}" if len(grupo) == 1 else f"p{grupo[0]}-{grupo[-1]}"

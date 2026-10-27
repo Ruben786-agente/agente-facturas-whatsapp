@@ -1129,6 +1129,8 @@ def actualizar_subida(tenant_id, nombre_guardado, estado=None, hechos=None, tota
         s = session.query(SubidaEstado).filter_by(tenant_id=tenant_id, nombre_guardado=nombre_guardado).first()
         if s is None:
             return False
+        if s.estado == "cancelando" and estado not in (None, "cancelado"):
+            return False   # la gestoría pidió cancelar: el avance del proceso no debe pisarlo
         if estado is not None:
             s.estado = estado
         if hechos is not None:
@@ -1140,6 +1142,30 @@ def actualizar_subida(tenant_id, nombre_guardado, estado=None, hechos=None, tota
         s.actualizado_en = datetime.now(timezone.utc)
         session.commit()
         return True
+    finally:
+        session.close()
+
+
+def pedir_cancelar_subida(tenant_id, subida_id):
+    """Marca la subida como «cancelando» si aún está en marcha. Devuelve True si se pudo."""
+    session = _obtener_session()
+    try:
+        s = session.query(SubidaEstado).filter_by(tenant_id=tenant_id, id=subida_id).first()
+        if s is None or s.estado not in ("recibido", "leyendo", "guardando", "esperando", "reintentando"):
+            return False
+        s.estado = "cancelando"
+        s.actualizado_en = datetime.now(timezone.utc)
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def subida_cancelada(tenant_id, nombre_guardado):
+    session = _obtener_session()
+    try:
+        s = session.query(SubidaEstado).filter_by(tenant_id=tenant_id, nombre_guardado=nombre_guardado).first()
+        return bool(s and s.estado == "cancelando")
     finally:
         session.close()
 

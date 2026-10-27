@@ -17,7 +17,7 @@ from flask import Blueprint, jsonify, render_template_string, request, session
 
 from autenticacion_google import ErrorAutorizacionGoogle
 from autenticacion_onedrive import ErrorAutorizacionMicrosoft
-from basededatos import crear_subida, listar_subidas, obtener_estado_conexiones, tenant_tiene_acceso
+from basededatos import crear_subida, listar_subidas, pedir_cancelar_subida, obtener_estado_conexiones, tenant_tiene_acceso
 from estilo_web import pagina
 from formatos import EXTENSIONES, tipo_real
 from panel_web import login_requerido
@@ -160,6 +160,11 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
       n.className = 'nombre'; n.textContent = it.nombre; s.className = 'estado'; s.textContent = it.texto;
       b.className = 'progreso'; var i = document.createElement('i'); i.style.width = (it.pct || 0) + '%'; b.appendChild(i);
       li.appendChild(n); li.appendChild(s);
+      if (it.clase === 'curso' && it.id && it.texto.indexOf('Cancelando') !== 0) {
+        var c = document.createElement('button'); c.type = 'button'; c.className = 'quitar'; c.textContent = 'Cancelar'; c.setAttribute('aria-label', 'Cancelar ' + it.nombre);
+        c.addEventListener('click', function () { cancelar(it, c); });
+        li.appendChild(c);
+      }
       if (it.clase !== 'curso') {
         var q = document.createElement('button'); q.type = 'button'; q.className = 'quitar'; q.textContent = 'Quitar'; q.setAttribute('aria-label', 'Quitar ' + it.nombre + ' de la lista');
         q.addEventListener('click', function () { quitar(it); });
@@ -168,6 +173,14 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
       li.appendChild(b);
       if (it.detalle) { var d = document.createElement('p'); d.className = 'detalle'; d.textContent = it.detalle; li.appendChild(d); }
       return li;
+    }
+    function cancelar(it, boton) {
+      if (!window.confirm('¿Cancelar «' + it.nombre + '»? Lo que ya se haya anotado en el Excel se queda; el resto no se procesará.')) { return; }
+      boton.disabled = true;
+      fetch('/subir/' + encodeURIComponent(it.id) + '/cancelar', { method: 'POST', headers: { 'X-CSRF-Token': token }, credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { if (!j.ok) { window.alert(j.mensaje || 'No se ha podido cancelar.'); } consultar(); })
+        .catch(function () { boton.disabled = false; window.alert('Sin conexión. Inténtelo de nuevo.'); });
     }
     var ocultas = [];
     try { ocultas = JSON.parse(localStorage.getItem('subidasOcultas') || '[]'); } catch (e) {}
@@ -300,6 +313,14 @@ def _describir(s):
         necesita = dudosas or sin_id or resumen.get("error") or resumen.get("en_espera")
         detalle = "Mírelas en el panel: lo que está en Revisión o Sin identificar necesita su decisión." if (dudosas or sin_id) else None
         return "Terminado: " + ", ".join(partes), ("aviso" if necesita else "ok"), 100, detalle
+    if estado == "cancelando":
+        return "Cancelando… se para al terminar la factura que está en marcha.", "curso", 50, None
+    if estado == "cancelado":
+        hechas = resumen.get("procesada", 0) + resumen.get("ticket", 0) + resumen.get("revision", 0) + resumen.get("sin_identificar", 0)
+        if resumen.get("antes_de_empezar"):
+            return "Cancelado antes de empezar. No se ha anotado nada.", "aviso", 100, "El archivo está en Entrada / No procesables."
+        return (f"Cancelado: {hechas} ya anotada(s) y {resumen.get('cancelada', 0)} sin procesar.", "aviso", 100,
+                "Lo ya anotado se queda en el Excel. Si vuelve a subir el PDF, las ya leídas se saltan (durante 2 días) y se procesan solo las que faltan.")
     if estado == "problema":
         return resumen.get("mensaje") or "No se ha podido procesar este archivo.", "error", 100, None
     if estado == "esperando":
@@ -328,3 +349,11 @@ def estado():
             continue   # lo que salió bien se retira solo a los 10 minutos; lo que tiene problema o necesita decisión se queda hasta que se quite
         salida.append({"id": s["id"], "nombre": s["nombre"], "texto": texto, "clase": clase, "pct": pct, "detalle": detalle})
     return jsonify(subidas=salida)
+
+
+@bp_subida.route("/subir/<subida_id>/cancelar", methods=["POST"])
+@login_requerido
+def cancelar(subida_id):
+    """Pide parar un archivo en marcha. Se para entre una factura y la siguiente; lo ya anotado se queda."""
+    ok = pedir_cancelar_subida(session["tenant_id"], subida_id)
+    return jsonify(ok=ok, mensaje=None if ok else "Ya no se puede cancelar: el archivo ha terminado o ya se está cancelando.")
