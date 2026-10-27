@@ -61,8 +61,8 @@ PLANTILLA = pagina("Clientes", """
   </details>
 
   <form method="post" action="{{ url_for('clientes.ajustes') }}" style="margin-top:14px;">
-    <label style="display:flex; gap:8px; align-items:flex-start;">
-      <input type="checkbox" name="alta_automatica" value="1" {% if alta_automatica %}checked{% endif %} onchange="this.form.submit()" style="margin-top:4px;">
+    <label style="display:flex; gap:10px; align-items:flex-start; max-width:640px; cursor:pointer;">
+      <input type="checkbox" name="alta_automatica" value="1" {% if alta_automatica %}checked{% endif %} onchange="this.form.submit()" style="flex:none; width:18px; height:18px; min-width:0; padding:0; margin:3px 0 0;">
       <span>Dar de alta clientes nuevos automáticamente con su primera factura.
         <span class="tenue">Si lo desmarca, solo se archivan facturas de los clientes de esta lista; las de empresas que no estén irán a «Sin identificar» para que decida usted.</span></span>
     </label>
