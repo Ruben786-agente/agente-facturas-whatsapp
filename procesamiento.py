@@ -413,24 +413,33 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
 LECTURAS_PARALELAS = max(1, int(os.environ.get("LECTURAS_PARALELAS", "4")))
 
 
-def leer_por_adelantado(contenidos, extraer=None):
+def leer_por_adelantado(contenidos, extraer=None, al_terminar=None):
     """
     Lee con IA varios documentos A LA VEZ (máx. LECTURAS_PARALELAS). Solo se paraleliza la lectura:
     comprobar duplicados, anotar en el Excel y archivar siguen haciéndose de uno en uno y en orden.
     Devuelve una lista con la factura leída de cada documento (None si esa lectura falló: se leerá
-    de nuevo de forma normal al llegarle el turno).
+    de nuevo de forma normal al llegarle el turno). 'al_terminar(hechos, total)' avisa cada vez que acaba una lectura.
     """
+    import threading
     from concurrent.futures import ThreadPoolExecutor
     leer = extraer or extraer_factura
+    cuenta, cerrojo = [0], threading.Lock()
 
     def una(c):
-        if c is None:
-            return None
         try:
-            return leer(c)
+            return leer(c) if c is not None else None
         except Exception:
             log.exception("Lectura previa fallida; se repetirá en su turno")
             return None
+        finally:
+            if al_terminar:
+                with cerrojo:
+                    cuenta[0] += 1
+                    hechos = cuenta[0]
+                try:
+                    al_terminar(hechos, len(contenidos))
+                except Exception:
+                    log.debug("No se pudo avisar del progreso", exc_info=True)
 
     if len(contenidos) <= 1 or LECTURAS_PARALELAS <= 1:
         return [una(c) for c in contenidos]
@@ -498,7 +507,7 @@ def _procesar_sin_repetir(storage, tenant_id, contenido, nombre_original, extrae
     return res
 
 
-def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=None, dividir=None):
+def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=None, dividir=None, progreso=None):
     """
     Punto de entrada para los canales (correo, OneDrive, WhatsApp). Si el archivo es un PDF
     con varias páginas, lo separa en documentos sueltos (un lote escaneado trae varias
@@ -515,7 +524,7 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
         listos, fallidos = formatos.normalizar(nombre_original, contenido)
         resultados = []
         for nombre_n, contenido_n in listos:
-            resultados += procesar_archivo(storage, tenant_id, contenido_n, nombre_n, extraer, dividir)
+            resultados += procesar_archivo(storage, tenant_id, contenido_n, nombre_n, extraer, dividir, progreso)
         if fallidos:
             motivo = fallidos[0][1] if len(fallidos) == 1 else f"{len(fallidos)} archivos no legibles"
             log.info("'%s': no se pudieron leer %s", nombre_original, fallidos)
@@ -552,14 +561,19 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
             ya_vistas.append(documento_ya_visto(tenant_id, _huella(parte)))
         except Exception:
             ya_vistas.append(False)
-    leidas = leer_por_adelantado([None if v else p for v, p in zip(ya_vistas, partes)], extraer)
+    if progreso:
+        progreso("leyendo", 0, len(partes))
+    leidas = leer_por_adelantado([None if v else p for v, p in zip(ya_vistas, partes)], extraer,
+                                 (lambda h, t: progreso("leyendo", h, t)) if progreso else None)
     try:
         detectar_cliente_emisor(storage, tenant_id, leidas)
     except Exception:
         log.exception("No se pudo comprobar si el emisor del lote es un cliente")
 
     resultados, primer_error, en_espera = [], None, []
-    for grupo, parte, leida in zip(grupos, partes, leidas):
+    for indice, (grupo, parte, leida) in enumerate(zip(grupos, partes, leidas)):
+        if progreso:
+            progreso("guardando", indice, len(partes))
         rango = f"p{grupo[0]}" if len(grupo) == 1 else f"p{grupo[0]}-{grupo[-1]}"
         nombre_parte = f"{base}_{rango}.pdf"
         try:

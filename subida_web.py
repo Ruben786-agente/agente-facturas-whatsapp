@@ -6,16 +6,18 @@ Los archivos se guardan en «Agente Facturas / Entrada» de su OneDrive o Google
 así que con Google Drive también la puede ver) y los recoge el mismo proceso que ya vigila esa carpeta (sondeo_entrada).
 """
 
+import json
 import logging
 import os
 import re
 import secrets
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, render_template_string, request, session
 
 from autenticacion_google import ErrorAutorizacionGoogle
 from autenticacion_onedrive import ErrorAutorizacionMicrosoft
-from basededatos import obtener_estado_conexiones, tenant_tiene_acceso
+from basededatos import crear_subida, listar_subidas, obtener_estado_conexiones, tenant_tiene_acceso
 from estilo_web import pagina
 from formatos import EXTENSIONES, tipo_real
 from panel_web import login_requerido
@@ -41,13 +43,22 @@ CSS_SUBIDA = """
   .lista .estado { flex: none; font-size: 14px; color: var(--tinta-3); }
   .lista .ok .estado { color: var(--ok); font-weight: 500; }
   .lista .mal .estado { color: var(--error); font-weight: 500; text-align: right; }
+  .lista li { flex-wrap: wrap; }
+  .lista .estado { max-width: 100%; text-align: right; }
+  .barra { flex-basis: 100%; height: 6px; border-radius: 3px; background: var(--linea); overflow: hidden; }
+  .barra > i { display: block; height: 100%; width: 0; background: var(--marca); transition: width .4s; }
+  .lista .ok .barra > i { background: var(--ok); }
+  .lista .aviso .barra > i { background: #d9a400; }
+  .lista .mal .barra > i { background: var(--error); }
+  .lista .aviso .estado { color: #8a6500; font-weight: 500; }
+  .lista .detalle { flex-basis: 100%; font-size: 14px; color: var(--tinta-2); margin: 0; }
 </style>
 """
 
 PLANTILLA_SUBIR = pagina("Subir facturas", """
 <main class="pagina estrecha" style="max-width:760px;">
   <h1 style="font-size:38px;">Subir facturas</h1>
-  <p class="tenue" style="margin-top:6px;">Arrastre aquí facturas, tickets o fotos de facturas. El agente las lee y las archiva igual que las del correo.</p>
+  <p class="tenue" style="margin-top:6px;">Arrastre aquí facturas, tickets o fotos de facturas. El agente las lee y las archiva igual que las del correo. Abajo verá cómo va cada archivo.</p>
 
   {% if not conectado %}
     <p class="alerta" role="alert" style="margin-top:20px;">Antes de subir facturas hace falta conectar su almacenamiento (OneDrive o Google Drive).
@@ -75,7 +86,7 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
     var zona = document.getElementById('zona'), entrada = document.getElementById('archivos');
     var lista = document.getElementById('lista'), resumen = document.getElementById('resumen');
     var token = (document.querySelector('input[name=csrf_token]') || {}).value || '';
-    var MAX = 25 * 1024 * 1024, cola = [], activos = 0, PARALELO = 3, subidos = 0, fallidos = 0, omitidos = 0;
+    var MAX = 25 * 1024 * 1024, cola = [], locales = [], remotos = [], activos = 0, PARALELO = 3, omitidos = 0, temporizador = null;
     var VALIDAS = '{{ aceptar }}'.split(',');
     function valida(nombre) { var i = nombre.lastIndexOf('.'); return i > 0 && VALIDAS.indexOf(nombre.slice(i).toLowerCase()) >= 0; }
     ['dragenter', 'dragover'].forEach(function (n) { zona.addEventListener(n, function (e) { e.preventDefault(); zona.classList.add('encima'); }); });
@@ -117,30 +128,54 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
     function anadir(archivos) {
       Array.prototype.forEach.call(archivos, function (f) {
         if (f.name.charAt(0) === '.' || f.name.charAt(0) === '~' || !valida(f.name)) { omitidos++; return; }
-        var li = document.createElement('li'), n = document.createElement('span'), s = document.createElement('span');
-        n.className = 'nombre'; n.textContent = f.name; s.className = 'estado'; s.textContent = 'En espera';
-        li.appendChild(n); li.appendChild(s); lista.appendChild(li);
-        if (f.size > MAX) { marcar(li, s, false, 'Pesa más de 25 MB'); return; }
-        cola.push({ f: f, li: li, s: s });
+        var it = { nombre: f.name, texto: 'En espera', clase: 'curso', pct: 2 };
+        locales.unshift(it);
+        if (f.size > MAX) { it.texto = 'Pesa más de 25 MB'; it.clase = 'error'; it.pct = 100; return; }
+        cola.push({ f: f, it: it });
       });
+      pintar();
       for (var k = 0; k < PARALELO; k++) { siguiente(); }
-    }
-    function marcar(li, s, bien, texto) {
-      li.className = bien ? 'ok' : 'mal'; s.textContent = texto;
-      if (bien) { subidos++; } else { fallidos++; }
-      resumen.textContent = subidos ? subidos + ' archivo(s) recibido(s). El agente los procesará en uno o dos minutos y los verá en el panel.' + (fallidos ? ' ' + fallidos + ' con problemas.' : '') + (omitidos ? ' ' + omitidos + ' omitido(s) por no ser PDF, imagen, ZIP o XML.' : '') : '';
     }
     function siguiente() {
       if (activos >= PARALELO || !cola.length) { return; }
       activos++;
-      var t = cola.shift(); t.s.textContent = 'Subiendo...';
+      var t = cola.shift(); t.it.texto = 'Subiendo...'; t.it.pct = 6; pintar();
       var datos = new FormData(); datos.append('archivo', t.f);
       fetch('{{ url_for("subida.subir_archivo") }}', { method: 'POST', body: datos, headers: { 'X-CSRF-Token': token }, credentials: 'same-origin' })
         .then(function (r) { return r.json().catch(function () { return { ok: false, mensaje: 'Error inesperado' }; }); })
-        .then(function (j) { marcar(t.li, t.s, j.ok, j.ok ? 'Recibido' : (j.mensaje || 'No se pudo subir')); })
-        .catch(function () { marcar(t.li, t.s, false, 'Sin conexión. Inténtelo de nuevo'); })
-        .then(function () { activos--; siguiente(); });
+        .then(function (j) {
+          if (j.ok) { locales.splice(locales.indexOf(t.it), 1); consultar(); }
+          else { t.it.texto = j.mensaje || 'No se pudo subir'; t.it.clase = 'error'; t.it.pct = 100; }
+        })
+        .catch(function () { t.it.texto = 'Sin conexión. Inténtelo de nuevo'; t.it.clase = 'error'; t.it.pct = 100; })
+        .then(function () { activos--; pintar(); siguiente(); });
     }
+
+    function fila(it) {
+      var li = document.createElement('li'), n = document.createElement('span'), s = document.createElement('span'), b = document.createElement('div');
+      li.className = it.clase === 'ok' ? 'ok' : it.clase === 'aviso' ? 'aviso' : it.clase === 'error' ? 'mal' : '';
+      n.className = 'nombre'; n.textContent = it.nombre; s.className = 'estado'; s.textContent = it.texto;
+      b.className = 'barra'; var i = document.createElement('i'); i.style.width = (it.pct || 0) + '%'; b.appendChild(i);
+      li.appendChild(n); li.appendChild(s); li.appendChild(b);
+      if (it.detalle) { var d = document.createElement('p'); d.className = 'detalle'; d.textContent = it.detalle; li.appendChild(d); }
+      return li;
+    }
+    function pintar() {
+      lista.textContent = '';
+      locales.concat(remotos).forEach(function (it) { lista.appendChild(fila(it)); });
+      var enCurso = remotos.filter(function (r) { return r.clase === 'curso'; }).length;
+      resumen.textContent = (omitidos ? omitidos + ' archivo(s) omitido(s) por no ser PDF, imagen, ZIP o XML. ' : '') +
+        (enCurso ? 'El agente está trabajando en ' + enCurso + ' archivo(s); esta página se actualiza sola, no hace falta quedarse.' : '');
+    }
+    function consultar() {
+      clearTimeout(temporizador);
+      fetch('{{ url_for("subida.estado") }}', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (j) {
+        remotos = j.subidas || []; pintar();
+        var enCurso = remotos.some(function (r) { return r.clase === 'curso'; }) || locales.length;
+        temporizador = setTimeout(consultar, enCurso ? 3000 : 30000);
+      }).catch(function () { temporizador = setTimeout(consultar, 8000); });
+    }
+    consultar();
   })();
   </script>
   {% endif %}
@@ -193,10 +228,73 @@ def subir_archivo():
         if storage is None:
             return jsonify(ok=False, mensaje="Conecte primero su almacenamiento"), 400
         carpetas = asegurar_carpetas(storage, tenant_id, proveedor, comprobar=True)
-        storage.subir_archivo(carpetas["entrada"], _nombre_seguro(archivo.filename), contenido)
+        guardado = _nombre_seguro(archivo.filename)
+        storage.subir_archivo(carpetas["entrada"], guardado, contenido)
+        crear_subida(tenant_id, os.path.basename(archivo.filename), guardado)
     except (ErrorAutorizacionGoogle, ErrorAutorizacionMicrosoft):
         return jsonify(ok=False, mensaje="Vuelva a conectar su almacenamiento en Conexiones"), 409
     except Exception:
         log.exception("No se pudo guardar '%s' de la gestoría %s", archivo.filename, tenant_id)
         return jsonify(ok=False, mensaje="No se pudo guardar. Inténtelo de nuevo"), 500
     return jsonify(ok=True)
+
+
+def _describir(s):
+    """(texto, clase, porcentaje, detalle) de una subida: clase = curso | ok | aviso | error."""
+    estado, total, hechos = s["estado"], s["total"] or 0, s["hechos"] or 0
+    try:
+        resumen = json.loads(s["resumen"]) if s["resumen"] else {}
+    except ValueError:
+        resumen = {}
+    antiguo = (datetime.now(timezone.utc) - s["actualizado_en"]).total_seconds() > 8 * 60 if s["actualizado_en"] else False
+    if estado == "terminado":
+        buenas = resumen.get("procesada", 0)
+        partes = []
+        if buenas:
+            partes.append(f"{buenas} factura(s) anotada(s) en el Excel")
+        if resumen.get("ticket"):
+            partes.append(f"{resumen['ticket']} ticket(s) archivado(s)")
+        dudosas = resumen.get("revision", 0)
+        sin_id = resumen.get("sin_identificar", 0)
+        if dudosas:
+            partes.append(f"{dudosas} en Revisión")
+        if sin_id:
+            partes.append(f"{sin_id} sin identificar")
+        if resumen.get("duplicado_exacto"):
+            partes.append(f"{resumen['duplicado_exacto']} duplicada(s), no se vuelven a anotar")
+        if resumen.get("ya_visto"):
+            partes.append(f"{resumen['ya_visto']} ya leída(s) antes")
+        if resumen.get("ignorado"):
+            partes.append(f"{resumen['ignorado']} página(s) que no eran facturas")
+        if resumen.get("error") or resumen.get("en_espera"):
+            partes.append(f"{resumen.get('error', 0) + resumen.get('en_espera', 0)} con fallo")
+        if not partes:
+            partes.append("Terminado")
+        necesita = dudosas or sin_id or resumen.get("error") or resumen.get("en_espera")
+        detalle = "Mírelas en el panel: lo que está en Revisión o Sin identificar necesita su decisión." if (dudosas or sin_id) else None
+        return "Terminado: " + ", ".join(partes), ("aviso" if necesita else "ok"), 100, detalle
+    if estado == "problema":
+        return resumen.get("mensaje") or "No se ha podido procesar este archivo.", "error", 100, None
+    if estado == "esperando":
+        return "El servicio de lectura no está disponible ahora. Su archivo espera y se leerá solo.", "curso", 15, None
+    if estado == "reintentando":
+        return "Ha habido un fallo y se está reintentando.", "curso", 30, None
+    lento = "Tarda más de lo normal; si sigue así, avísenos." if antiguo else None
+    if estado == "leyendo":
+        pct = 15 + (int(45 * hechos / total) if total else 10)
+        return (f"Leyendo las facturas ({hechos} de {total})" if total > 1 else "Leyendo la factura…"), "curso", pct, lento
+    if estado == "guardando":
+        pct = 60 + (int(38 * hechos / total) if total else 20)
+        return (f"Anotando en el Excel ({hechos} de {total})" if total > 1 else "Anotando en el Excel…"), "curso", pct, lento
+    return "Recibido. Esperando su turno (menos de un minuto)", "curso", 12, lento
+
+
+@bp_subida.route("/subir/estado")
+@login_requerido
+def estado():
+    """Cómo va cada archivo subido hace poco (lo pide la página cada pocos segundos)."""
+    salida = []
+    for s in listar_subidas(session["tenant_id"]):
+        texto, clase, pct, detalle = _describir(s)
+        salida.append({"id": s["id"], "nombre": s["nombre"], "texto": texto, "clase": clase, "pct": pct, "detalle": detalle})
+    return jsonify(subidas=salida)

@@ -16,6 +16,7 @@ Variables opcionales: ENTRADA_MAX_POR_CICLO (por defecto 30 archivos por gestor�
 """
 
 import hashlib
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -26,7 +27,7 @@ from autenticacion_google import ErrorAutorizacionGoogle
 from autenticacion_onedrive import ErrorAutorizacionMicrosoft
 from almacenamiento_tenant import storage_para_tenant
 from basededatos import (crear_aviso, guardar_carpetas_entrada, obtener_carpetas_entrada, olvidar_carpetas_entrada,
-                         documento_ya_visto, proveedor_almacenamiento_activo, registrar_intento_fallido, tenants_con_almacenamiento)
+                         actualizar_subida, documento_ya_visto, proveedor_almacenamiento_activo, registrar_intento_fallido, tenants_con_almacenamiento)
 from onboarding import CARPETA_RAIZ
 from procesamiento import LECTURAS_PARALELAS, detectar_cliente_emisor, procesar_archivo
 from extraccion_ia import ServicioIANoDisponible, extraer_factura
@@ -139,6 +140,20 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
     resumen = {"procesados": 0, "apartados": 0, "fallidos": 0, "pendientes": 0}
     apartados_no_leibles = []
 
+    def _estado(archivo, **campos):
+        """Cómo va este archivo, para que la gestoría lo vea en «Subir facturas». Si no vino de ahí, no hace nada."""
+        try:
+            actualizar_subida(tenant_id, archivo.nombre, **campos)
+        except Exception:
+            log.debug("No se pudo anotar el estado de '%s'", archivo.nombre, exc_info=True)
+
+    def _resumen(resultados):
+        cuentas = {}
+        for r in resultados:
+            clave = (r or {}).get("accion") or "error"
+            cuentas[clave] = cuentas.get(clave, 0) + 1
+        return json.dumps(cuentas)
+
     # 1) Qué archivos se tratan en este ciclo.
     a_tratar = []
     for archivo in archivos:
@@ -160,6 +175,7 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
         if archivo.id in precargas:
             return
         precargas[archivo.id] = None
+        _estado(archivo, estado="leyendo")
         try:
             ext = os.path.splitext(archivo.nombre)[1].lower()
             if ext not in EXTENSIONES or archivo.tamano_bytes > MAX_BYTES or archivo.tamano_bytes > 8 * 1024 * 1024:
@@ -205,6 +221,7 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
                 if extension not in EXTENSIONES or archivo.tamano_bytes > MAX_BYTES:
                     motivo = "formato no admitido (use PDF, imagen o ZIP)" if extension not in EXTENSIONES else "pesa demasiado (más de 25 MB)"
                     _mover(storage, archivo, carpetas["no_procesables"])
+                    _estado(archivo, estado="problema", resumen=json.dumps({"mensaje": f"No se ha podido leer: {motivo}."}))
                     apartados_no_leibles.append(f"{archivo.nombre} ({motivo})")
                     resumen["apartados"] += 1
                     continue
@@ -212,6 +229,7 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
                 contenido, lectura = previo if previo else (storage.descargar_archivo(archivo.id), None)
                 if not _es_lectura_posible(contenido):
                     _mover(storage, archivo, carpetas["no_procesables"])
+                    _estado(archivo, estado="problema", resumen=json.dumps({"mensaje": "El archivo no se puede leer. Si es una foto, guárdela como JPG o PDF y vuelva a subirla."}))
                     apartados_no_leibles.append(f"{archivo.nombre} (el archivo no se puede leer; si es una foto, guárdela como JPG)")
                     resumen["apartados"] += 1
                     continue
@@ -222,7 +240,9 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
                     except Exception:
                         log.exception("Entrada %s: lectura adelantada fallida en '%s'; se repite", tenant_id, archivo.nombre)
                 extraer = (lambda _c, f=factura_previa: f) if factura_previa is not None else None
-                resultados = procesar_archivo(storage, tenant_id, contenido, archivo.nombre, extraer=extraer)
+                _estado(archivo, estado="guardando")
+                resultados = procesar_archivo(storage, tenant_id, contenido, archivo.nombre, extraer=extraer,
+                                              progreso=lambda fase, hechos, total, a=archivo: _estado(a, estado=fase, hechos=hechos, total=total))
                 log.info("Entrada %s: '%s' -> %s", tenant_id, archivo.nombre, [(r or {}).get("accion") for r in resultados])
                 try:
                     _mover(storage, archivo, carpetas["procesados"])
@@ -230,9 +250,12 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
                     # El archivo ya está tratado y su huella guardada: si no se pudo mover, la próxima vez no se vuelve a pagar la IA.
                     log.exception("Entrada %s: tratado '%s' pero no se pudo mover a Procesados", tenant_id, archivo.nombre)
                 resumen["procesados"] += 1
+                _estado(archivo, estado="terminado", resumen=_resumen(resultados))
             except ServicioIANoDisponible:
                 # Sin saldo o caída del servicio de IA: el archivo se queda en Entrada y no cuenta como fallo. Se para el ciclo.
                 resumen["pendientes"] += 1
+                for resto in a_tratar[i:]:
+                    _estado(resto, estado="esperando")
                 crear_aviso(tenant_id, "ia_no_disponible",
                             "El servicio de lectura de facturas no está disponible en este momento. No se ha perdido nada: sus documentos "
                             "siguen en la carpeta Entrada y se leerán solos en cuanto se recupere. Si el aviso dura más de un día, escríbanos.")
@@ -240,6 +263,9 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
             except Exception as e:
                 intentos = registrar_intento_fallido(tenant_id, f"entrada:{archivo.id}", f"{type(e).__name__}: {e}")
                 resumen["fallidos"] += 1
+                _estado(archivo, estado="problema" if intentos >= MAX_INTENTOS else "reintentando",
+                        resumen=json.dumps({"mensaje": "No se ha podido procesar después de varios intentos. Queda en Entrada / No procesables: súbalo de nuevo o anótelo a mano."})
+                        if intentos >= MAX_INTENTOS else None)
                 if intentos >= MAX_INTENTOS:
                     log.exception("Entrada %s: '%s' falló %d veces; se aparta", tenant_id, archivo.nombre, intentos)
                     try:

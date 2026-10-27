@@ -117,6 +117,21 @@ class ProveedorAprendido(Base):
     creado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class SubidaEstado(Base):
+    """Cómo va cada archivo que la gestoría sube desde «Subir facturas» (recibido, leyendo, terminado, con problema...)."""
+    __tablename__ = "subidas_estado"
+    id = _uuid_column()
+    tenant_id = Column(String(36), ForeignKey("gestorias.tenant_id"), nullable=False, index=True)
+    nombre = Column(String, nullable=False)              # el que tenía el archivo al subirlo
+    nombre_guardado = Column(String, nullable=False)     # el que tiene en «Entrada» (con un código delante)
+    estado = Column(String, nullable=False, default="recibido")
+    hechos = Column(Integer, nullable=False, default=0)
+    total = Column(Integer, nullable=False, default=0)
+    resumen = Column(Text)                               # JSON: cuántas facturas de cada tipo, o un mensaje
+    creado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    actualizado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
 class CorreoProcesado(Base):
     __tablename__ = "correos_procesados"
     __table_args__ = (UniqueConstraint("tenant_id", "mensaje_id", name="uq_correo_tenant_mensaje"),)
@@ -1092,6 +1107,53 @@ def guardar_alta_automatica(tenant_id, activa):
         g.alta_automatica = bool(activa)
         session.commit()
         return True
+    finally:
+        session.close()
+
+
+def crear_subida(tenant_id, nombre, nombre_guardado):
+    session = _obtener_session()
+    try:
+        s = SubidaEstado(tenant_id=tenant_id, nombre=nombre[:200], nombre_guardado=nombre_guardado)
+        session.add(s)
+        session.commit()
+        return s.id
+    finally:
+        session.close()
+
+
+def actualizar_subida(tenant_id, nombre_guardado, estado=None, hechos=None, total=None, resumen=None):
+    """Cambia el estado de una subida (si el archivo no vino de «Subir facturas», no hay nada que cambiar)."""
+    session = _obtener_session()
+    try:
+        s = session.query(SubidaEstado).filter_by(tenant_id=tenant_id, nombre_guardado=nombre_guardado).first()
+        if s is None:
+            return False
+        if estado is not None:
+            s.estado = estado
+        if hechos is not None:
+            s.hechos = hechos
+        if total is not None:
+            s.total = total
+        if resumen is not None:
+            s.resumen = resumen
+        s.actualizado_en = datetime.now(timezone.utc)
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def listar_subidas(tenant_id, dias=3, limite=40):
+    """Subidas recientes de la gestoría, las más nuevas primero."""
+    from datetime import timedelta
+    session = _obtener_session()
+    try:
+        desde = datetime.now(timezone.utc) - timedelta(days=dias)
+        filas = (session.query(SubidaEstado).filter(SubidaEstado.tenant_id == tenant_id, SubidaEstado.creado_en >= desde)
+                 .order_by(SubidaEstado.creado_en.desc()).limit(limite).all())
+        return [{"id": s.id, "nombre": s.nombre, "estado": s.estado, "hechos": s.hechos, "total": s.total, "resumen": s.resumen,
+                 "creado_en": _como_aware_utc(s.creado_en), "actualizado_en": _como_aware_utc(s.actualizado_en)} for s in filas]
     finally:
         session.close()
 
