@@ -176,7 +176,11 @@ PLANTILLA_PANEL = pagina("Panel", """
           {% if p.destino == "REVISION" %}
             {% if p.corregible %}<form class="en-linea aparte" method="post" action="{{ url_for('revision.aceptar', factura_id=p.id) }}"><button class="btn principal" type="submit"
               onclick="return confirm('¿Añadir al Excel tal como la ha leído el agente? Compruebe antes con «Ver factura» que los datos son correctos.');">Añadir al Excel tal cual</button></form>
-            <a class="btn" href="{{ url_for('revision.corregir', factura_id=p.id) }}">Corregir y añadir</a>{% endif %}
+            <a class="btn" href="{{ url_for('revision.corregir', factura_id=p.id) }}">Corregir y añadir</a>
+            {% if p.sin_cif_emisor %}<form class="en-linea aparte" method="post" action="{{ url_for('revision.venta_propia', factura_id=p.id) }}"><button class="btn" type="submit"
+              onclick="return confirm('¿La ha emitido el propio cliente ({{ p.empresa }})? Se anotará como VENTA suya. Si en realidad es una compra, use «Corregir y añadir».');">Es una venta del propio cliente</button></form>
+            {% if p.otras_mismo_emisor %}<form class="en-linea aparte" method="post" action="{{ url_for('revision.venta_propia', factura_id=p.id) }}"><input type="hidden" name="todas" value="1"><button class="btn" type="submit"
+              onclick="return confirm('Se anotarán como ventas de {{ p.empresa }} esta factura y otras {{ p.otras_mismo_emisor }} del mismo emisor sin CIF. ¿Seguro?');">…y las otras {{ p.otras_mismo_emisor }} iguales</button></form>{% endif %}{% endif %}{% endif %}
             <a class="btn" href="{{ url_for('revision.ver_revision', factura_id=p.id) }}" target="_blank" rel="noopener">Ver factura</a>
             <a class="btn discreto" href="{{ url_for('revision.abrir_revision', factura_id=p.id) }}" target="_blank" rel="noopener">Abrir carpeta</a>
             <form class="en-linea aparte" method="post" action="{{ url_for('revision.revisada', factura_id=p.id) }}"><button class="btn discreto" type="submit" onclick="return confirm('Esto quita la factura de la lista SIN añadirla al Excel. ¿Seguro?');">Quitar de la lista (sin añadir)</button></form>

@@ -694,3 +694,45 @@ def reprocesar_revision(storage, tenant_id, factura_id, factura):
     elif res["accion"] == "duplicado_exacto":
         marcar_revisada(tenant_id, factura_id)
     return res
+
+
+def marcar_venta_propia(storage, tenant_id, factura_id, aplicar_a_todas=False):
+    """
+    La gestoría indica que una factura en Revisión (emisor sin CIF) la ha emitido el propio cliente: se le pone
+    el CIF del cliente como emisor y se reprocesa (va a su hoja de VENTAS y se recuerda el nombre para las siguientes).
+    Con aplicar_a_todas, lo mismo para las demás de ese cliente con el mismo emisor sin CIF.
+    Devuelve {"hechas": n, "fallidas": n, "duplicadas": n, "primera": resultado}.
+    """
+    from basededatos import listar_revisiones_mismo_emisor_sin_cif, _nombre_sin_cif_emisor
+    r = obtener_revision(tenant_id, factura_id)
+    if not r or r["destino"] != "REVISION" or not (r["datos"] or {}).get("factura"):
+        return {"hechas": 0, "fallidas": 1, "duplicadas": 0, "primera": {"accion": "error", "motivo": "Ya no está pendiente."}}
+    ids = [factura_id]
+    if aplicar_a_todas:
+        norm = _nombre_sin_cif_emisor(__import__("json").dumps(r["datos"]))
+        if norm:
+            ids += [i for i in listar_revisiones_mismo_emisor_sin_cif(tenant_id, r["empresa"]["id"], norm) if i != factura_id]
+    out = {"hechas": 0, "fallidas": 0, "duplicadas": 0, "primera": None}
+    for i in ids:
+        ri = obtener_revision(tenant_id, i)
+        if not ri or ri["destino"] != "REVISION" or not (ri["datos"] or {}).get("factura"):
+            out["fallidas"] += 1
+            continue
+        factura = dict(ri["datos"]["factura"])
+        emisor = dict(factura.get("emisor") or {})
+        emisor["cif_nif"] = ri["empresa"]["cif_nif"]
+        factura["emisor"] = emisor
+        try:
+            res = reprocesar_revision(storage, tenant_id, i, factura)
+        except Exception:
+            log.exception("Fallo marcando venta propia %s", i)
+            res = {"accion": "error"}
+        if i == factura_id:
+            out["primera"] = res
+        if res["accion"] == "procesada":
+            out["hechas"] += 1
+        elif res["accion"] == "duplicado_exacto":
+            out["duplicadas"] += 1
+        else:
+            out["fallidas"] += 1
+    return out

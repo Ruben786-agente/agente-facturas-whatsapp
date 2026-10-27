@@ -19,7 +19,7 @@ from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_car
 from estilo_web import pagina
 from panel_web import login_requerido
 from periodo_fiscal import nombres_excel_posibles, periodo_efectivo
-from procesamiento import reprocesar_revision, asignar_sin_identificar
+from procesamiento import reprocesar_revision, asignar_sin_identificar, marcar_venta_propia
 from clasificador_documentos import nombre_archivo_destino
 
 log = logging.getLogger("revision_web")
@@ -201,6 +201,31 @@ def aceptar(factura_id):
     else:
         flash(f"No se ha podido añadir tal cual ({res.get('motivo') or 'datos incompletos'}). Corríjala a mano.")
         return redirect(url_for("revision.corregir", factura_id=factura_id))
+    return redirect(url_for("panel.panel"))
+
+
+@bp_revision.route("/revision/<factura_id>/venta-propia", methods=["POST"])
+@login_requerido
+def venta_propia(factura_id):
+    """El emisor sin CIF es el propio cliente: se anota como venta suya (y, si se pide, también las demás iguales)."""
+    tenant_id = session["tenant_id"]
+    try:
+        storage = _storage(tenant_id)
+        if not storage:
+            raise RuntimeError("No hay almacenamiento conectado")
+        res = marcar_venta_propia(storage, tenant_id, factura_id, aplicar_a_todas=request.form.get("todas") == "1")
+    except Exception:
+        log.exception("Fallo en venta propia %s", factura_id)
+        flash("Ha habido un problema al guardar. Inténtelo de nuevo.")
+        return redirect(url_for("panel.panel"))
+    partes = []
+    if res["hechas"]:
+        partes.append(f"{res['hechas']} factura(s) añadida(s) como venta del cliente")
+    if res["duplicadas"]:
+        partes.append(f"{res['duplicadas']} ya estaban anotadas")
+    if res["fallidas"]:
+        partes.append(f"{res['fallidas']} no se han podido añadir (revíselas con «Corregir y añadir»)")
+    flash(". ".join(partes) + "." if partes else "No se ha podido añadir.")
     return redirect(url_for("panel.panel"))
 
 

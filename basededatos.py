@@ -1266,7 +1266,16 @@ def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
                     "id": f.id, "empresa": nombre_empresa, "fecha": f.fecha_factura.strftime("%d/%m/%Y"),
                     "proveedor": f.proveedor_nombre or "(desconocido)", "total": float(f.total_factura),
                     "destino": "REVISION", "motivo": f.motivo, "corregible": bool(f.datos_json),
+                    "sin_cif_emisor": _nombre_sin_cif_emisor(f.datos_json), "empresa_id": f.empresa_cliente_id,
                 })
+        cuenta = {}
+        for a in atencion:
+            if a.get("sin_cif_emisor"):
+                k = (a["empresa_id"], a["sin_cif_emisor"])
+                cuenta[k] = cuenta.get(k, 0) + 1
+        for a in atencion:
+            if a.get("sin_cif_emisor"):
+                a["otras_mismo_emisor"] = cuenta[(a["empresa_id"], a["sin_cif_emisor"])] - 1
         sin_id = (session.query(DocumentoSinIdentificar).filter_by(tenant_id=tenant_id)
                   .order_by(DocumentoSinIdentificar.registrado_en.desc()).all())
         resumen["SIN_IDENTIFICAR"] = len(sin_id)
@@ -1529,6 +1538,29 @@ def obtener_avisos(tenant_id):
     try:
         filas = session.query(Aviso).filter_by(tenant_id=tenant_id, visto=False).order_by(Aviso.creado_en.desc()).limit(20).all()
         return [{"id": a.id, "tipo": a.tipo, "mensaje": a.mensaje, "creado_en": _como_aware_utc(a.creado_en)} for a in filas]
+    finally:
+        session.close()
+
+
+def _nombre_sin_cif_emisor(datos_json):
+    """Si la lectura guardada tiene emisor con nombre pero SIN CIF, devuelve su nombre normalizado (si no, None)."""
+    import json
+    try:
+        d = json.loads(datos_json) if datos_json else None
+    except ValueError:
+        return None
+    emisor = ((d or {}).get("factura") or {}).get("emisor") or {}
+    cif = "".join(ch for ch in (emisor.get("cif_nif") or "") if ch.isalnum())
+    norm = _nombre_norm(emisor.get("nombre"))
+    return norm if (not cif and len(norm) >= 4) else None
+
+
+def listar_revisiones_mismo_emisor_sin_cif(tenant_id, empresa_id, nombre_norm):
+    """Ids de las facturas en Revisión de esa empresa cuyo emisor tiene ese nombre y no tiene CIF."""
+    session = _obtener_session()
+    try:
+        filas = session.query(FacturaCache).filter_by(tenant_id=tenant_id, empresa_cliente_id=empresa_id, destino="REVISION").all()
+        return [f.id for f in filas if f.datos_json and _nombre_sin_cif_emisor(f.datos_json) == nombre_norm]
     finally:
         session.close()
 
