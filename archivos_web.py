@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from io import BytesIO
 
-from flask import Blueprint, render_template_string, request, session, send_file, redirect, url_for, flash
+from flask import Blueprint, jsonify, render_template_string, request, session, send_file, redirect, url_for, flash
 
 from almacenamiento_tenant import storage_para_tenant
 from basededatos import obtener_empresas_con_carpetas, obtener_carpeta_sin_identificar, obtener_estado_conexiones
@@ -52,25 +52,33 @@ PLANTILLA_INICIO = pagina("Archivos", """
   {% elif error %}
     <p class="alerta error" role="alert" style="margin-top:20px;">No se han podido leer sus carpetas. Compruebe que el almacenamiento sigue conectado en Conexiones.</p>
   {% else %}
-  <div class="tarjetas">
+  <div class="tarjetas" id="tarjetas">
     {% for e in empresas %}
-    <div class="tarjeta">
+    <div class="tarjeta" data-tarjeta>
       <h3>{{ e.nombre }}</h3><span class="cif">{{ e.cif_nif }}</span>
       <div class="enlaces">
-        {% for clave in e.con_archivos %}<a class="btn" href="{{ url_for('archivos.carpeta', empresa_id=e.id, clave=clave) }}">{{ carpetas[clave] }}</a>{% endfor %}
+        {% for clave in e.con_archivos %}<a class="btn" data-k="{{ e.id }}|{{ clave }}" href="{{ url_for('archivos.carpeta', empresa_id=e.id, clave=clave) }}">{{ carpetas[clave] }}</a>{% endfor %}
       </div>
     </div>
     {% endfor %}
     {% if sin_identificar %}
-    <div class="tarjeta">
+    <div class="tarjeta" data-tarjeta>
       <h3>Sin identificar</h3><span class="cif">Documentos sin empresa asignada</span>
-      <div class="enlaces"><a class="btn" href="{{ url_for('archivos.carpeta', empresa_id='sin-identificar', clave='sin-identificar') }}">Ver archivos</a></div>
+      <div class="enlaces"><a class="btn" data-k="sin-identificar|sin-identificar" href="{{ url_for('archivos.carpeta', empresa_id='sin-identificar', clave='sin-identificar') }}">Ver archivos</a></div>
     </div>
     {% endif %}
   </div>
-  {% if not empresas and not sin_identificar %}
-    <div class="vacio"><strong>Todavía no hay archivos.</strong>Cuando el agente lea la primera factura, aquí aparecerá la carpeta de cada cliente.</div>
-  {% endif %}
+  <div class="vacio" id="vacio" {% if empresas or sin_identificar %}hidden{% endif %}><strong>Todavía no hay archivos.</strong>Cuando el agente lea la primera factura, aquí aparecerá la carpeta de cada cliente.</div>
+  <script>
+  // La página sale al instante; las carpetas vacías se esconden en cuanto se sabe cuáles son (se comprueban aparte, en segundo plano).
+  fetch('{{ url_for("archivos.estado") }}', {credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(function (j) {
+    if (!j.ok) { return; }
+    document.querySelectorAll('[data-k]').forEach(function (b) { if (j.hay[b.dataset.k] === false) { b.remove(); } });
+    var quedan = 0;
+    document.querySelectorAll('[data-tarjeta]').forEach(function (t) { if (t.querySelector('[data-k]')) { quedan++; } else { t.remove(); } });
+    if (!quedan) { document.getElementById('vacio').hidden = false; }
+  }).catch(function () {});
+  </script>
   {% endif %}
 </main>
 """, activa="archivos", extra_head=CSS_ARCHIVOS)
@@ -143,41 +151,58 @@ def _tiene_archivos(storage, carpeta_id):
         return None
 
 
-def _que_hay(tenant_id):
-    """Qué carpetas tienen archivos: ([empresas con 'con_archivos'], ¿hay sin identificar?, ¿no se pudo leer nada?)."""
-    ahora = time.monotonic()
-    guardado = _memoria.get(tenant_id)
-    if guardado and ahora - guardado[0] < SEGUNDOS_MEMORIA:
-        return guardado[1]
+def _calcular_hay(tenant_id):
+    """Mira en el almacenamiento qué carpetas tienen archivos: ({(id, clave): True/False/None}, ¿no se pudo leer nada?)."""
     storage = storage_para_tenant(tenant_id)
     empresas = obtener_empresas_con_carpetas(tenant_id)
     sin_id = obtener_carpeta_sin_identificar(tenant_id)
     tareas = [(e["id"], clave, e[clave]) for e in empresas for clave in CARPETAS if e[clave]]
     if sin_id:
         tareas.append(("sin-identificar", "sin-identificar", sin_id))
-    with ThreadPoolExecutor(max_workers=8) as pool:   # varias carpetas a la vez, para que no se note la espera
+    with ThreadPoolExecutor(max_workers=8) as pool:   # varias carpetas a la vez
         resultados = list(pool.map(lambda t: _tiene_archivos(storage, t[2]), tareas)) if storage else []
     hay = {(t[0], t[1]): r for t, r in zip(tareas, resultados)}
+    error = bool(resultados) and all(r is None for r in resultados)
+    _memoria[tenant_id] = (time.monotonic(), hay, error)
+    return hay, error
+
+
+def _estructura(tenant_id, hay):
+    """Empresas con sus carpetas, sin esperar al almacenamiento. 'hay' (si se conoce) esconde las carpetas vacías."""
     visibles = []
-    for e in empresas:
+    for e in obtener_empresas_con_carpetas(tenant_id):
         con = [clave for clave in CARPETAS if e[clave] and hay.get((e["id"], clave)) is not False]
         if con:
             visibles.append({**e, "con_archivos": con})
-    sin_identificar = bool(sin_id) and hay.get(("sin-identificar", "sin-identificar")) is not False
-    error = bool(resultados) and all(r is None for r in resultados)
-    datos = (visibles, sin_identificar, error)
-    _memoria[tenant_id] = (ahora, datos)
-    return datos
+    sin_identificar = bool(obtener_carpeta_sin_identificar(tenant_id)) and hay.get(("sin-identificar", "sin-identificar")) is not False
+    return visibles, sin_identificar
 
 
 @bp_archivos.route("/archivos")
 @login_requerido
 def inicio():
+    """Sale al instante: con lo último que se sabía de las carpetas vacías (si hay algo en memoria) o con todas."""
     tenant_id = session["tenant_id"]
     conectado = bool(obtener_estado_conexiones(tenant_id)["almacenamiento"])
-    empresas, sin_identificar, error = _que_hay(tenant_id) if conectado else ([], False, False)
+    guardado = _memoria.get(tenant_id)
+    if guardado and time.monotonic() - guardado[0] > 300:   # lo guardado es antiguo: pudo llegar algo nuevo; salen todas y el script esconde las vacías
+        guardado = None
+    empresas, sin_identificar = _estructura(tenant_id, guardado[1] if guardado else {}) if conectado else ([], False)
     return render_template_string(PLANTILLA_INICIO, conectado=conectado, carpetas=CARPETAS, empresas=empresas,
-                                  sin_identificar=sin_identificar, error=error)
+                                  sin_identificar=sin_identificar, error=False)
+
+
+@bp_archivos.route("/archivos/estado")
+@login_requerido
+def estado():
+    """Qué carpetas tienen archivos (lo pide la página en segundo plano)."""
+    tenant_id = session["tenant_id"]
+    guardado = _memoria.get(tenant_id)
+    if guardado and time.monotonic() - guardado[0] < SEGUNDOS_MEMORIA:
+        hay, error = guardado[1], guardado[2]
+    else:
+        hay, error = _calcular_hay(tenant_id)
+    return jsonify(ok=not error, hay={f"{k[0]}|{k[1]}": v for k, v in hay.items()})
 
 
 @bp_archivos.route("/archivos/<empresa_id>/<clave>")
