@@ -45,11 +45,11 @@ CSS_SUBIDA = """
   .lista .mal .estado { color: var(--error); font-weight: 500; text-align: right; }
   .lista li { flex-wrap: wrap; }
   .lista .estado { max-width: 100%; text-align: right; }
-  .barra { flex-basis: 100%; height: 6px; border-radius: 3px; background: var(--linea); overflow: hidden; }
-  .barra > i { display: block; height: 100%; width: 0; background: var(--marca); transition: width .4s; }
-  .lista .ok .barra > i { background: var(--ok); }
-  .lista .aviso .barra > i { background: #d9a400; }
-  .lista .mal .barra > i { background: var(--error); }
+  .progreso { flex-basis: 100%; height: 6px; border-radius: 3px; background: var(--linea); overflow: hidden; }
+  .progreso > i { display: block; height: 100%; width: 0; background: var(--marca); transition: width .4s; }
+  .lista .ok .progreso > i { background: var(--ok); }
+  .lista .aviso .progreso > i { background: #d9a400; }
+  .lista .mal .progreso > i { background: var(--error); }
   .lista .aviso .estado { color: #8a6500; font-weight: 500; }
   .lista .detalle { flex-basis: 100%; font-size: 14px; color: var(--tinta-2); margin: 0; }
 </style>
@@ -155,7 +155,7 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
       var li = document.createElement('li'), n = document.createElement('span'), s = document.createElement('span'), b = document.createElement('div');
       li.className = it.clase === 'ok' ? 'ok' : it.clase === 'aviso' ? 'aviso' : it.clase === 'error' ? 'mal' : '';
       n.className = 'nombre'; n.textContent = it.nombre; s.className = 'estado'; s.textContent = it.texto;
-      b.className = 'barra'; var i = document.createElement('i'); i.style.width = (it.pct || 0) + '%'; b.appendChild(i);
+      b.className = 'progreso'; var i = document.createElement('i'); i.style.width = (it.pct || 0) + '%'; b.appendChild(i);
       li.appendChild(n); li.appendChild(s); li.appendChild(b);
       if (it.detalle) { var d = document.createElement('p'); d.className = 'detalle'; d.textContent = it.detalle; li.appendChild(d); }
       return li;
