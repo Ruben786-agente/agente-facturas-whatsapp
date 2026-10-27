@@ -36,6 +36,7 @@ class Gestoria(Base):
     stripe_subscription_id = Column(String)
     carpeta_sin_identificar_id = Column(String)
     periodicidad = Column(String, nullable=False, default="mensual", server_default="mensual")  # del Excel: mensual | trimestral
+    alta_automatica = Column(Boolean, nullable=False, default=True, server_default="1")  # dar de alta clientes nuevos con la primera factura
     activa = Column(Boolean, nullable=False, default=True)
     creada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -262,6 +263,13 @@ def _anadir_columnas_nuevas(motor):
                 conexion.execute(text("ALTER TABLE gestorias ADD COLUMN periodicidad VARCHAR NOT NULL DEFAULT 'mensual'"))
     except Exception:
         log.exception("No se pudo añadir la columna periodicidad a las gestorías")
+    try:
+        columnas = {c["name"] for c in inspect(motor).get_columns("gestorias")}
+        if "alta_automatica" not in columnas:
+            with motor.begin() as conexion:
+                conexion.execute(text("ALTER TABLE gestorias ADD COLUMN alta_automatica BOOLEAN NOT NULL DEFAULT TRUE"))
+    except Exception:
+        log.exception("No se pudo añadir la columna alta_automatica a las gestorías")
     try:
         columnas = {c["name"] for c in inspect(motor).get_columns("empresas_cliente")}
         if "periodicidad" not in columnas:
@@ -1060,6 +1068,30 @@ def cliente_quitado(tenant_id, cif):
     session = _obtener_session()
     try:
         return session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=(cif or "").strip().upper(), activa=False).first() is not None
+    finally:
+        session.close()
+
+
+def alta_automatica_activa(tenant_id):
+    """True (lo normal) si los clientes nuevos se dan de alta solos con su primera factura."""
+    session = _obtener_session()
+    try:
+        g = session.query(Gestoria).filter_by(tenant_id=tenant_id).first()
+        valor = getattr(g, "alta_automatica", None) if g else None
+        return True if valor is None else bool(valor)
+    finally:
+        session.close()
+
+
+def guardar_alta_automatica(tenant_id, activa):
+    session = _obtener_session()
+    try:
+        g = session.query(Gestoria).filter_by(tenant_id=tenant_id).first()
+        if not g:
+            return False
+        g.alta_automatica = bool(activa)
+        session.commit()
+        return True
     finally:
         session.close()
 

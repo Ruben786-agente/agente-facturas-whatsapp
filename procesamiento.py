@@ -26,7 +26,7 @@ import requests
 from datetime import datetime
 
 from validar_cif import comprobar as comprobar_cif
-from basededatos import aprender_proveedor, buscar_proveedor_aprendido
+from basededatos import aprender_proveedor, buscar_proveedor_aprendido, alta_automatica_activa
 from basededatos import (
     crear_aviso, documento_ya_visto, eliminar_factura_cache, marcar_documento_visto, marcar_revisada,
     obtener_revision, registrar_sin_identificar, resolver_sin_identificar, cliente_quitado,
@@ -388,6 +388,9 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
     # El CIF ya normalizado se usa también dentro de la factura, para que coincida con el de la empresa.
     factura = {**factura, "destinatario": {**destinatario, "cif_nif": cif}}
 
+    if not resolver_empresa_cliente_por_cif(tenant_id, [cif]) and not alta_automatica_activa(tenant_id):
+        return _sin_identificar(storage, tenant_id, nombre, contenido, "empresa que no esta en su lista de clientes")
+
     if factura.get("confianza") != "baja":
         nombre_empresa = (destinatario.get("nombre") or "").strip() or cif
         if alta_empresa_cliente(storage, tenant_id, nombre_empresa, cif).get("nueva"):
@@ -437,16 +440,17 @@ def leer_por_adelantado(contenidos, extraer=None):
 
 def detectar_cliente_emisor(storage, tenant_id, facturas):
     """
-    Un lote donde UN mismo emisor firma la mayoría de las facturas y se las manda a varios compradores distintos
-    es el libro de ventas de ese emisor: el emisor es el cliente de la gestoría y los compradores son clientes SUYOS.
-    Si aún no está dado de alta, se da de alta (con aviso) para que sus facturas vayan a su hoja VENTAS
-    y no se creen sus compradores como clientes de la gestoría. Devuelve el CIF dado de alta, o None.
-    Prudencia: hace falta >= 3 facturas, >= la mitad del lote, >= 2 compradores distintos, que ningún comprador sea ya
-    cliente activo (entonces el emisor es un proveedor) y que el emisor no sea un cliente que se quitó a mano.
+    Un emisor que firma la mayoría de las facturas de un lote y se las manda a varios compradores distintos es el libro de ventas
+    de ese emisor: el emisor es el cliente de la gestoría y los compradores son clientes SUYOS.
+    Si aún no está dado de alta, se da de alta (con aviso) para que sus facturas vayan a su hoja VENTAS y no se creen sus
+    compradores como clientes de la gestoría. Devuelve el CIF dado de alta, o None.
+    Prudencia: hacen falta >= 3 facturas del emisor y >= 2 compradores distintos en el lote, el emisor debe firmar la mitad del lote, ningún
+    comprador del lote puede ser ya cliente activo (entonces el emisor es un proveedor), el emisor no puede ser un cliente
+    quitado a mano y la gestoría no puede tener desactivada el alta automática.
     """
     from collections import Counter, defaultdict
     docs = [f for f in (facturas or []) if f and not f.get("_lectura_fallida") and f.get("es_documento_fiscal", True)]
-    if len(docs) < 3:
+    if not docs:
         return None
     por_emisor = defaultdict(list)
     for f in docs:
@@ -454,24 +458,26 @@ def detectar_cliente_emisor(storage, tenant_id, facturas):
         if e:
             por_emisor[e].append(f)
     for cif_e, fs in sorted(por_emisor.items(), key=lambda kv: -len(kv[1])):
-        if len(fs) < 3 or len(fs) * 2 < len(docs):
+        if len(fs) * 2 < len(docs):
             break
         if comprobar_cif(cif_e)[1]:
             continue
         if resolver_empresa_cliente_por_cif(tenant_id, [cif_e]) or cliente_quitado(tenant_id, cif_e):
             continue
-        compradores = {_normaliza_cif((f.get("destinatario") or {}).get("cif_nif")) for f in fs} - {"", cif_e}
-        if len(compradores) < 2:
+        comp_lote = {_normaliza_cif((f.get("destinatario") or {}).get("cif_nif")) for f in fs} - {"", cif_e}
+        if len(fs) < 3 or len(comp_lote) < 2:
             continue
-        if any(resolver_empresa_cliente_por_cif(tenant_id, [c]) for c in compradores):
+        if any(resolver_empresa_cliente_por_cif(tenant_id, [c]) for c in comp_lote):
+            continue
+        if not alta_automatica_activa(tenant_id):
             continue
         nombre = Counter((f.get("emisor") or {}).get("nombre", "").strip() for f in fs).most_common(1)[0][0] or cif_e
         if alta_empresa_cliente(storage, tenant_id, nombre, cif_e).get("nueva"):
             crear_aviso(tenant_id, "empresa_nueva", f"{nombre} ({cif_e})")
             crear_aviso(tenant_id, "emisor_detectado",
                         f"Estas facturas las emite {nombre} ({cif_e}), así que lo hemos dado de alta como cliente y sus facturas van a su hoja de VENTAS; "
-                        "sus compradores no se dan de alta como clientes de la gestoría. Si no es cliente suyo, quítelo en Clientes.")
-            log.info("Emisor %s detectado como cliente por repetirse en el lote", cif_e)
+                        f"sus compradores no se dan de alta como clientes de la gestoría. Si no es cliente suyo, quítelo en Clientes.")
+            log.info("Emisor %s detectado como cliente por repetirse en el lote (%d facturas, %d compradores)", cif_e, len(fs), len(comp_lote))
             return cif_e
     return None
 

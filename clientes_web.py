@@ -6,12 +6,16 @@
   - y, arriba, añadir un cliente a mano (para no depender de que el agente lo deduzca de una factura).
 """
 
+import csv
+import io
 import logging
+import re
+import threading
 
 from flask import Blueprint, render_template_string, request, session, redirect, url_for, flash
 
 from almacenamiento_tenant import storage_para_tenant
-from basededatos import (reactivar_cliente, listar_clientes, guardar_periodicidad_cliente, quitar_cliente, obtener_periodicidad,
+from basededatos import (alta_automatica_activa, guardar_alta_automatica, reactivar_cliente, listar_clientes, guardar_periodicidad_cliente, quitar_cliente, obtener_periodicidad,
                          obtener_estado_conexiones)
 from estilo_web import pagina
 from onboarding import alta_empresa_cliente
@@ -32,10 +36,36 @@ PLANTILLA = pagina("Clientes", """
   «Un solo Excel» recoge todas las facturas aunque sean de meses distintos: la fecha de cada línea la puede ajustar usted en el Excel al contabilizarla.</p>
   {% with m = get_flashed_messages() %}{% if m %}<p class="mensaje" role="status" style="margin-top:16px;">{{ m[0] }}</p>{% endif %}{% endwith %}
 
+  {% if trabajo %}
+    <p class="mensaje" role="status" style="margin-top:16px;">
+      {% if trabajo.terminado %}Importación terminada: {{ trabajo.nuevos }} añadido(s){% if trabajo.existentes %}, {{ trabajo.existentes }} ya estaban{% endif %}{% if trabajo.errores %}, {{ trabajo.errores|length }} con problemas{% endif %}.
+      {% else %}Importando clientes: {{ trabajo.hechos }} de {{ trabajo.total }}. Tarda unos segundos por cliente; puede seguir usando el panel.<meta http-equiv="refresh" content="6">{% endif %}
+    </p>
+    {% if trabajo.errores %}<ul class="tenue" style="margin:8px 0 0 18px;">{% for e in trabajo.errores[:15] %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+  {% endif %}
+
   <form method="post" action="{{ url_for('clientes.nuevo') }}" class="estado-linea" style="margin-top:20px; gap:8px; flex-wrap:wrap;">
     <input name="nombre" placeholder="Nombre del cliente" aria-label="Nombre del cliente" required style="max-width:260px;">
     <input name="cif" placeholder="CIF/NIF" aria-label="CIF o NIF" required style="max-width:150px;">
     <button class="btn" type="submit">Añadir cliente</button>
+  </form>
+
+  <details style="margin-top:14px;">
+    <summary class="tenue" style="cursor:pointer;">Importar varios clientes a la vez</summary>
+    <form method="post" action="{{ url_for('clientes.importar') }}" enctype="multipart/form-data" style="margin-top:10px; display:grid; gap:8px; max-width:560px;">
+      <p class="tenue" style="margin:0;">Pegue una línea por cliente (CIF y nombre, en cualquier orden, separados por tabulador, «;» o coma), o suba un Excel o CSV con esas columnas.</p>
+      <textarea name="lista" rows="6" placeholder="B12345674;Mi Cliente SL&#10;12345678Z;Nombre Apellido" aria-label="Lista de clientes"></textarea>
+      <input type="file" name="archivo" accept=".xlsx,.csv,.txt" aria-label="Archivo de clientes">
+      <button class="btn" type="submit" style="justify-self:start;">Importar clientes</button>
+    </form>
+  </details>
+
+  <form method="post" action="{{ url_for('clientes.ajustes') }}" style="margin-top:14px;">
+    <label style="display:flex; gap:8px; align-items:flex-start;">
+      <input type="checkbox" name="alta_automatica" value="1" {% if alta_automatica %}checked{% endif %} onchange="this.form.submit()" style="margin-top:4px;">
+      <span>Dar de alta clientes nuevos automáticamente con su primera factura.
+        <span class="tenue">Si lo desmarca, solo se archivan facturas de los clientes de esta lista; las de empresas que no estén irán a «Sin identificar» para que decida usted.</span></span>
+    </label>
   </form>
 
   {% if clientes %}
@@ -70,11 +100,118 @@ PLANTILLA = pagina("Clientes", """
 """, activa="clientes")
 
 
+_TRABAJOS = {}   # progreso de la importación de cada gestoría (un solo proceso de servidor: basta con memoria)
+RE_CIF = re.compile(r"(?<![A-Za-z0-9])([XYZxyz]\d{7}[A-Za-z]|\d{8}[A-Za-z]|[A-Za-z]\d{7}[0-9A-Za-z])(?![A-Za-z0-9])")
+MAX_IMPORTAR = 400
+
+
+def leer_clientes(texto):
+    """De un texto (una línea por cliente, CIF y nombre en cualquier orden) saca [(nombre, cif)] y los avisos de líneas no entendidas."""
+    clientes, avisos, vistos = [], [], set()
+    for linea in (texto or "").splitlines():
+        original = linea.strip()
+        if not original:
+            continue
+        m = RE_CIF.search(original)
+        if not m:
+            avisos.append(f"«{original[:50]}»: no se encuentra un CIF")
+            continue
+        nombre = re.sub(r"[;\t,|]+", " ", original[:m.start()] + " " + original[m.end():])
+        nombre = re.sub(r"\s+", " ", nombre).strip(" -–:.")
+        cif, error = comprobar_cif(m.group(1))
+        if error or not nombre:
+            avisos.append(f"«{original[:50]}»: " + ("el CIF no es válido (revise el dígito o la letra final)" if error else "falta el nombre"))
+        elif cif not in vistos:
+            vistos.add(cif)
+            clientes.append((nombre, cif))
+    return clientes, avisos
+
+
+def _texto_de_archivo(archivo):
+    datos = archivo.read(5 * 1024 * 1024)
+    if (archivo.filename or "").lower().endswith(".xlsx"):
+        from openpyxl import load_workbook
+        hoja = load_workbook(io.BytesIO(datos), read_only=True, data_only=True).active
+        return "\n".join(";".join("" if v is None else str(v) for v in fila) for fila in hoja.iter_rows(values_only=True))
+    for codificacion in ("utf-8-sig", "latin-1"):
+        try:
+            return datos.decode(codificacion)
+        except UnicodeDecodeError:
+            continue
+    return ""
+
+
+def _importar_en_segundo_plano(tenant_id, clientes):
+    trabajo = _TRABAJOS[tenant_id]
+    try:
+        storage = storage_para_tenant(tenant_id)
+        for nombre, cif in clientes:
+            try:
+                if reactivar_cliente(tenant_id, cif):
+                    trabajo["nuevos"] += 1
+                elif alta_empresa_cliente(storage, tenant_id, nombre, cif).get("nueva"):
+                    trabajo["nuevos"] += 1
+                else:
+                    trabajo["existentes"] += 1
+            except Exception:
+                log.exception("No se pudo importar el cliente %s", cif)
+                trabajo["errores"].append(f"{nombre} ({cif}): no se pudo crear")
+            trabajo["hechos"] += 1
+    except Exception:
+        log.exception("Fallo importando clientes")
+        trabajo["errores"].append("Se interrumpió la importación. Compruebe que el almacenamiento sigue conectado y repítala: los ya añadidos no se duplican.")
+    finally:
+        trabajo["terminado"] = True
+
+
+@bp_clientes.route("/clientes/importar", methods=["POST"])
+@login_requerido
+def importar():
+    tenant_id = session["tenant_id"]
+    actual = _TRABAJOS.get(tenant_id)
+    if actual and not actual["terminado"]:
+        flash("Ya hay una importación en marcha; espere a que termine.")
+        return redirect(url_for("clientes.lista"))
+    texto = request.form.get("lista", "")
+    archivo = request.files.get("archivo")
+    try:
+        if archivo and archivo.filename:
+            texto += "\n" + _texto_de_archivo(archivo)
+    except Exception:
+        log.exception("No se pudo leer el archivo de clientes")
+        flash("No se ha podido leer el archivo. Use un Excel (.xlsx), un CSV o pegue la lista.")
+        return redirect(url_for("clientes.lista"))
+    clientes, avisos = leer_clientes(texto)
+    if not clientes:
+        flash("No he encontrado ningún cliente en lo que ha enviado. Cada línea necesita un CIF y un nombre.")
+        return redirect(url_for("clientes.lista"))
+    if len(clientes) > MAX_IMPORTAR:
+        flash(f"Son demasiados de golpe (máximo {MAX_IMPORTAR}). Divida la lista.")
+        return redirect(url_for("clientes.lista"))
+    if not storage_para_tenant(tenant_id):
+        flash("Conecte primero su almacenamiento en Conexiones.")
+        return redirect(url_for("clientes.lista"))
+    _TRABAJOS[tenant_id] = {"total": len(clientes), "hechos": 0, "nuevos": 0, "existentes": 0, "errores": list(avisos), "terminado": False}
+    threading.Thread(target=_importar_en_segundo_plano, args=(tenant_id, clientes), daemon=True).start()
+    return redirect(url_for("clientes.lista"))
+
+
+@bp_clientes.route("/clientes/ajustes", methods=["POST"])
+@login_requerido
+def ajustes():
+    activa = request.form.get("alta_automatica") == "1"
+    guardar_alta_automatica(session["tenant_id"], activa)
+    flash("Los clientes nuevos se darán de alta solos con su primera factura." if activa else
+          "A partir de ahora solo se archivan facturas de los clientes de esta lista; las demás irán a «Sin identificar».")
+    return redirect(url_for("clientes.lista"))
+
+
 @bp_clientes.route("/clientes")
 @login_requerido
 def lista():
     tenant_id = session["tenant_id"]
     return render_template_string(PLANTILLA, clientes=listar_clientes(tenant_id), opciones=OPCIONES,
+                                  trabajo=_TRABAJOS.get(tenant_id), alta_automatica=alta_automatica_activa(tenant_id),
                                   por_defecto=NOMBRE_POR_DEFECTO.get(obtener_periodicidad(tenant_id), "un Excel al mes"),
                                   gestoria_nombre=obtener_estado_conexiones(tenant_id)["nombre"])
 
