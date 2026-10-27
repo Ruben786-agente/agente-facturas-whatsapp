@@ -51,6 +51,8 @@ CSS_SUBIDA = """
   .lista .aviso .progreso > i { background: #d9a400; }
   .lista .mal .progreso > i { background: var(--error); }
   .lista .aviso .estado { color: #8a6500; font-weight: 500; }
+  .lista .quitar { flex: none; background: none; border: 0; color: var(--tinta-3); text-decoration: underline; cursor: pointer; font: inherit; font-size: 14px; padding: 0 4px; }
+  .lista .quitar:hover { color: var(--marca); }
   .lista .detalle { flex-basis: 100%; font-size: 14px; color: var(--tinta-2); margin: 0; }
 </style>
 """
@@ -81,6 +83,7 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
   </form>
   <ul class="lista" id="lista" aria-live="polite"></ul>
   <p class="tenue" id="resumen" style="margin-top:16px;"></p>
+  <p style="margin-top:8px;"><button type="button" id="limpiar" class="btn discreto" hidden>Quitar de la lista las terminadas</button></p>
   <script>
   (function () {
     var zona = document.getElementById('zona'), entrada = document.getElementById('archivos');
@@ -156,13 +159,37 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
       li.className = it.clase === 'ok' ? 'ok' : it.clase === 'aviso' ? 'aviso' : it.clase === 'error' ? 'mal' : '';
       n.className = 'nombre'; n.textContent = it.nombre; s.className = 'estado'; s.textContent = it.texto;
       b.className = 'progreso'; var i = document.createElement('i'); i.style.width = (it.pct || 0) + '%'; b.appendChild(i);
-      li.appendChild(n); li.appendChild(s); li.appendChild(b);
+      li.appendChild(n); li.appendChild(s);
+      if (it.clase !== 'curso') {
+        var q = document.createElement('button'); q.type = 'button'; q.className = 'quitar'; q.textContent = 'Quitar'; q.setAttribute('aria-label', 'Quitar ' + it.nombre + ' de la lista');
+        q.addEventListener('click', function () { quitar(it); });
+        li.appendChild(q);
+      }
+      li.appendChild(b);
       if (it.detalle) { var d = document.createElement('p'); d.className = 'detalle'; d.textContent = it.detalle; li.appendChild(d); }
       return li;
     }
+    var ocultas = [];
+    try { ocultas = JSON.parse(localStorage.getItem('subidasOcultas') || '[]'); } catch (e) {}
+    function guardarOcultas() { try { localStorage.setItem('subidasOcultas', JSON.stringify(ocultas.slice(-300))); } catch (e) {} }
+    function quitar(it) {
+      if (it.id) { ocultas.push(it.id); guardarOcultas(); }
+      else { var i = locales.indexOf(it); if (i >= 0) { locales.splice(i, 1); } }
+      pintar();
+    }
+    function limpiar() {
+      remotos.forEach(function (r) { if (r.clase !== 'curso') { ocultas.push(r.id); } });
+      guardarOcultas();
+      locales = locales.filter(function (l) { return l.clase === 'curso'; });
+      pintar();
+    }
+    document.getElementById('limpiar').addEventListener('click', limpiar);
     function pintar() {
       lista.textContent = '';
-      locales.concat(remotos).forEach(function (it) { lista.appendChild(fila(it)); });
+      var visibles = remotos.filter(function (r) { return ocultas.indexOf(r.id) < 0; });
+      locales.concat(visibles).forEach(function (it) { lista.appendChild(fila(it)); });
+      var terminadas = locales.concat(visibles).filter(function (r) { return r.clase !== 'curso'; }).length;
+      document.getElementById('limpiar').hidden = terminadas < 2;
       var enCurso = remotos.filter(function (r) { return r.clase === 'curso'; }).length;
       resumen.textContent = (omitidos ? omitidos + ' archivo(s) omitido(s) por no ser PDF, imagen, ZIP o XML. ' : '') +
         (enCurso ? 'El agente está trabajando en ' + enCurso + ' archivo(s); esta página se actualiza sola, no hace falta quedarse.' : '');
@@ -296,5 +323,8 @@ def estado():
     salida = []
     for s in listar_subidas(session["tenant_id"]):
         texto, clase, pct, detalle = _describir(s)
+        hace = (datetime.now(timezone.utc) - s["actualizado_en"]).total_seconds() if s["actualizado_en"] else 0
+        if clase == "ok" and hace > 10 * 60:
+            continue   # lo que salió bien se retira solo a los 10 minutos; lo que tiene problema o necesita decisión se queda hasta que se quite
         salida.append({"id": s["id"], "nombre": s["nombre"], "texto": texto, "clase": clase, "pct": pct, "detalle": detalle})
     return jsonify(subidas=salida)
