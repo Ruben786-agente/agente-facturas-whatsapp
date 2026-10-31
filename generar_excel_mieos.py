@@ -42,10 +42,10 @@ def _clasifica(factura, cif_empresa):
     cif_emisor = (factura["emisor"].get("cif_nif") or "").strip().upper()
     cif_dest = (factura["destinatario"].get("cif_nif") or "").strip().upper()
     cif_empresa = cif_empresa.strip().upper()
+    if cif_emisor == cif_empresa:
+        return "VENTAS"   # si el emisor es la propia empresa, es una venta (aunque la lectura repita su CIF como comprador)
     if cif_dest == cif_empresa:
         return "COMPRAS"
-    if cif_emisor == cif_empresa:
-        return "VENTAS"
     return None
 
 

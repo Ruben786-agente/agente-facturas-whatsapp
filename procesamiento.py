@@ -462,6 +462,12 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
     # Factura EMITIDA por un cliente de la gestoría (una venta suya): el comprador es un cliente de SU cliente, no de la gestoría.
     # Se archiva en el cliente emisor (hoja VENTAS) y no se da de alta al comprador.
     emisor_cif = _normaliza_cif((factura.get("emisor") or {}).get("cif_nif"))
+    if emisor_cif and emisor_cif == cif and resolver_empresa_cliente_por_cif(tenant_id, [emisor_cif]):
+        # Emisor y comprador con el mismo CIF es imposible en una factura real: la lectura confundió el comprador (p. ej. alumno sin NIF)
+        # con el propio emisor. Es una venta del cliente: se quita el comprador falso y sigue como venta.
+        destinatario = {**destinatario, "cif_nif": ""}
+        factura = {**factura, "destinatario": destinatario, "sin_cif_destinatario": True}
+        cif = ""
     if emisor_cif and emisor_cif != cif and not (cif and resolver_empresa_cliente_por_cif(tenant_id, [cif])):
         emisora = resolver_empresa_cliente_por_cif(tenant_id, [emisor_cif])
         if emisora:
