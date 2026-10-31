@@ -153,11 +153,21 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
         except Exception:
             return False
 
-    def _resumen(resultados):
+    def _resumen(resultados, desde=None):
         cuentas = {}
         for r in resultados:
             clave = (r or {}).get("accion") or "error"
             cuentas[clave] = cuentas.get(clave, 0) + 1
+        if desde is not None:   # huecos en la numeración de las ventas del propio cliente (solo un aviso)
+            try:
+                from basededatos import huecos_de_serie
+                huecos = []
+                for cif in sorted({(r or {}).get("cif") for r in resultados if (r or {}).get("cif")}):
+                    huecos += huecos_de_serie(tenant_id, cif, desde)
+                if huecos:
+                    cuentas["_huecos"] = huecos[:40]
+            except Exception:
+                log.exception("Entrada %s: no se pudo comprobar la numeración", tenant_id)
         return json.dumps(cuentas)
 
     # 1) Qué archivos se tratan en este ciclo.
@@ -254,6 +264,7 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
                         log.exception("Entrada %s: lectura adelantada fallida en '%s'; se repite", tenant_id, archivo.nombre)
                 extraer = (lambda _c, f=factura_previa: f) if factura_previa is not None else None
                 _estado(archivo, estado="guardando")
+                inicio_archivo = datetime.now(timezone.utc)
                 resultados = procesar_archivo(storage, tenant_id, contenido, archivo.nombre, extraer=extraer,
                                               progreso=lambda fase, hechos, total, a=archivo: _estado(a, estado=fase, hechos=hechos, total=total),
                                               parar=lambda a=archivo: _cancelada(a))
@@ -268,7 +279,7 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
                 if canceladas:
                     _estado(archivo, estado="cancelado", resumen=_resumen(resultados))
                 else:
-                    _estado(archivo, estado="terminado", resumen=_resumen(resultados))
+                    _estado(archivo, estado="terminado", resumen=_resumen(resultados, inicio_archivo))
             except ServicioIANoDisponible:
                 # Sin saldo o caída del servicio de IA: el archivo se queda en Entrada y no cuenta como fallo. Se para el ciclo.
                 resumen["pendientes"] += 1

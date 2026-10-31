@@ -15,7 +15,7 @@ from almacenamiento_tenant import storage_para_tenant
 from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_carpeta_sin_identificar,
                          obtener_revision, resolver_sin_identificar, resolver_empresa_cliente_por_cif,
                          listar_proveedores_aprendidos, olvidar_proveedor_aprendido,
-                         obtener_sin_identificar, listar_empresas_activas, eliminar_tickets_de_empresa, listar_sin_identificar_ilegibles)
+                         obtener_sin_identificar, listar_empresas_activas, eliminar_tickets_de_empresa, olvidar_documentos_vistos, listar_sin_identificar_ilegibles)
 from estilo_web import pagina
 from panel_web import login_requerido
 from periodo_fiscal import nombres_excel_posibles, periodo_efectivo
@@ -248,6 +248,7 @@ def devolver_tickets(cif):
         for a in archivos:
             storage.mover_o_renombrar(a.id, carpetas["entrada"], a.nombre)
         eliminar_tickets_de_empresa(tenant_id, empresa["id"])
+        olvidar_documentos_vistos(tenant_id)   # si no, al releerlos se saltarían por «ya leídos» y se perderían
     except Exception:
         log.exception("No se pudieron devolver los tickets de %s", cif)
         flash("No se ha podido completar. Compruebe que el almacenamiento sigue conectado en Conexiones e inténtelo de nuevo.")

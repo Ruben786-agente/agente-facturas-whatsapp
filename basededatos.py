@@ -860,6 +860,65 @@ def marcar_documento_visto(tenant_id, huella):
         session.close()
 
 
+def olvidar_documentos_vistos(tenant_id):
+    """Borra la memoria de documentos ya leídos (para que lo que se devuelve a Entrada se lea de verdad otra vez)."""
+    session = _obtener_session()
+    try:
+        n = session.query(DocumentoVisto).filter_by(tenant_id=tenant_id).delete()
+        session.commit()
+        return n
+    finally:
+        session.close()
+
+
+def _partir_numero(num):
+    """'AC-167-2026' -> ('AC-', 167, '-2026', 3);  '1234' -> ('', 1234, '', 4);  otra cosa -> None."""
+    import re
+    m = re.match(r"^(.*?\D)?(\d{1,7})([-/]\d{4})?$", (num or "").strip())
+    if not m:
+        return None
+    return (m.group(1) or "", int(m.group(2)), m.group(3) or "", len(m.group(2)))
+
+
+def huecos_de_serie(tenant_id, cif_empresa, desde):
+    """
+    Números que faltan en la numeración de las facturas EMITIDAS por esa empresa (sus ventas) dentro de lo que se acaba de procesar.
+    Mira las facturas anotadas desde 'desde'; por cada serie (prefijo + sufijo de año) va del número menor al mayor de ese lote y
+    devuelve los que no están registrados (en ningún destino). Es solo un aviso: una factura anulada también deja hueco.
+    """
+    cif = "".join(ch for ch in (cif_empresa or "") if ch.isalnum()).upper()
+    session = _obtener_session()
+    try:
+        empresa = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=cif_empresa).first()
+        if not empresa:
+            return []
+        filas = session.query(FacturaCache).filter_by(tenant_id=tenant_id, empresa_cliente_id=empresa.id).all()
+        propias = [f for f in filas if "".join(ch for ch in (f.proveedor_cif or "") if ch.isalnum()).upper() == cif]
+        series = {}
+        for f in propias:
+            p = _partir_numero(f.num_factura)
+            if not p:
+                continue
+            d = series.setdefault((p[0], p[2]), {"todos": set(), "lote": set(), "ancho": p[3]})
+            d["todos"].add(p[1])
+            d["ancho"] = max(d["ancho"], p[3])
+            if f.procesada_en and _como_aware_utc(f.procesada_en) >= desde:
+                d["lote"].add(p[1])
+        faltan = []
+        for (pre, suf), d in sorted(series.items()):
+            if len(d["lote"]) < 2:
+                continue
+            lo, hi = min(d["lote"]), max(d["lote"])
+            if hi - lo > 2000:
+                continue
+            for n in range(lo, hi + 1):
+                if n not in d["todos"]:
+                    faltan.append(f"{pre}{str(n).zfill(d['ancho'])}{suf}")
+        return faltan[:40]
+    finally:
+        session.close()
+
+
 def correo_ya_procesado(tenant_id, mensaje_id):
     session = _obtener_session()
     try:

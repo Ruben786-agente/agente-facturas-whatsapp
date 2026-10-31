@@ -310,8 +310,14 @@ def _describir(s):
             partes.append(f"{resumen.get('error', 0) + resumen.get('en_espera', 0)} con fallo")
         if not partes:
             partes.append("Terminado")
-        necesita = dudosas or sin_id or resumen.get("error") or resumen.get("en_espera")
+        huecos = resumen.get("_huecos") or []
+        necesita = dudosas or sin_id or resumen.get("error") or resumen.get("en_espera") or huecos
         detalle = "Mírelas en el panel: lo que está en Revisión o Sin identificar necesita su decisión." if (dudosas or sin_id) else None
+        if huecos:
+            aviso = ("Faltan estos números en la numeración de facturas emitidas: " + ", ".join(huecos[:12])
+                     + (f" y {len(huecos) - 12} más" if len(huecos) > 12 else "")
+                     + ". Pueden ser facturas anuladas o que no se hayan leído: compruébelo.")
+            detalle = f"{detalle} {aviso}" if detalle else aviso
         return "Terminado: " + ", ".join(partes), ("aviso" if necesita else "ok"), 100, detalle
     if estado == "cancelando":
         return "Cancelando… se para al terminar la factura que está en marcha.", "curso", 50, None
