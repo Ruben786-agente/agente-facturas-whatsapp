@@ -101,14 +101,14 @@ def _sin_identificar(storage, tenant_id, nombre, contenido, motivo):
     if not carpeta:
         preparar_gestoria(storage, tenant_id)
         carpeta = obtener_carpeta_sin_identificar(tenant_id)
-    storage.subir_archivo(carpeta, nombre_archivo_destino(nombre, "REVISION", motivo), contenido)
+    _subir_original(storage, carpeta, nombre_archivo_destino(nombre, "REVISION", motivo), contenido)
     registrar_sin_identificar(tenant_id, nombre, motivo)
     return {"accion": "sin_identificar", "motivo": motivo}
 
 
 def _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, motivo):
     nombre_en_revision = nombre_archivo_destino(nombre, "REVISION", motivo)
-    storage.subir_archivo(empresa["carpeta_revision_id"], nombre_en_revision, contenido)
+    _subir_original(storage, empresa["carpeta_revision_id"], nombre_en_revision, contenido)
     guardar_factura_procesada(
         tenant_id=tenant_id, cif_empresa_cliente=empresa["cif_nif"], tipo_documento="factura_completa",
         num_factura=(factura.get("num_factura") or "").strip() or "(sin número)",
@@ -129,7 +129,7 @@ def _guardar_ticket(storage, tenant_id, empresa, nombre, contenido, factura):
     except ValueError:  # fecha ilegible: no se puede comparar
         posible_duplicado = None
     nombre_final = nombre_archivo_destino(nombre, "REVISION", "posible duplicado") if posible_duplicado else nombre
-    storage.subir_archivo(empresa["carpeta_tickets_id"], nombre_final, contenido)
+    _subir_original(storage, empresa["carpeta_tickets_id"], nombre_final, contenido)
     guardar_factura_procesada(
         tenant_id=tenant_id, cif_empresa_cliente=empresa["cif_nif"], tipo_documento="ticket",
         num_factura=(ticket["num_factura"] or "").strip() or "(sin número)",
@@ -213,6 +213,18 @@ class _LoteExcel:
             raise
 
 
+def _subir_original(storage, carpeta_id, nombre, contenido):
+    """Sube el PDF/imagen original. Si el almacenamiento lo rechaza (p. ej. OneDrive da 404/409 con un nombre que acaba de borrarse), se
+    reintenta con otro nombre en vez de perder la factura."""
+    try:
+        return storage.subir_archivo(carpeta_id, nombre, contenido)
+    except Exception as e:
+        base, ext = os.path.splitext(nombre)
+        alternativo = f"{base}_2{ext}"
+        log.warning("No se pudo subir '%s' (%s); se reintenta como '%s'", nombre, e, alternativo)
+        return storage.subir_archivo(carpeta_id, alternativo, contenido)
+
+
 def _registradas(tenant_id, cif_empresa):
     lote = _LOTE.get()
     return obtener_facturas_ya_registradas(tenant_id, cif_empresa) + (lote.registradas(cif_empresa) if lote else [])
@@ -275,7 +287,7 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, re
         return _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, resultado["motivo"])
 
     if contenido is not None:
-        storage.subir_archivo(empresa["carpeta_facturas_id"], nombre, contenido)
+        _subir_original(storage, empresa["carpeta_facturas_id"], nombre, contenido)
     registro = dict(
         tenant_id=tenant_id, cif_empresa_cliente=empresa["cif_nif"], tipo_documento="factura_completa",
         num_factura=numero or "(sin número)", fecha_factura=factura["fecha_factura"],
