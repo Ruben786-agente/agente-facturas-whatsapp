@@ -168,7 +168,9 @@ class _LoteExcel:
     """
     def __init__(self, storage, tenant_id, tamano=None):
         self.storage, self.tenant_id, self.tamano = storage, tenant_id, tamano or TAMANO_TANDA
-        self.excels, self.pendientes, self.huellas = {}, [], []
+        self.excels, self.pendientes = {}, []
+        self.huella_actual = None
+        self.descartadas = 0   # filas que no llegaron a subirse y hubo que tirar (hay que repetir el archivo)
 
     def excel(self, carpeta_id, nombre):
         clave = (carpeta_id, nombre)
@@ -180,9 +182,21 @@ class _LoteExcel:
     def anotar(self, carpeta_id, nombre, nuevo_excel, registro):
         e = self.excels[(carpeta_id, nombre)]
         e["contenido"], e["sucio"] = nuevo_excel, True
+        # Cada factura lleva consigo la huella de su documento: solo se da por "leído" cuando la factura ya está en el Excel y en la base de datos.
+        registro = {**registro, "_huella": self.huella_actual}
+        clave = lambda r: (r["cif_empresa_cliente"], r["num_factura"], r["proveedor_cif"], round(float(r["total_factura"]), 2))
+        self.pendientes = [r for r in self.pendientes if clave(r) != clave(registro)]   # un reintento del mismo documento no duplica
         self.pendientes.append(registro)
         if len(self.pendientes) >= self.tamano:
             self.vaciar()
+
+    def huella_pendiente(self, huella):
+        return any(r.get("_huella") == huella for r in self.pendientes)
+
+    def descartar(self):
+        """Una carpeta desapareció a mitad de camino: lo que aún no estaba subido se tira (y se avisa para repetir el archivo)."""
+        self.descartadas += len(self.pendientes)
+        self.excels, self.pendientes = {}, []
 
     def registradas(self, cif_empresa):
         return [{"tenant_id": self.tenant_id, "cif_empresa_cliente": cif_empresa, "num_factura": r["num_factura"],
@@ -201,13 +215,14 @@ class _LoteExcel:
                     ordenado = e["contenido"]
                 self.storage.subir_archivo(carpeta_id, nombre, ordenado)
                 e["contenido"], e["sucio"] = ordenado, False
-        pendientes, huellas = self.pendientes, self.huellas
-        self.pendientes, self.huellas = [], []
         try:
-            for r in pendientes:
-                guardar_factura_procesada(**r)
-            for h in huellas:
-                marcar_documento_visto(self.tenant_id, h)
+            while self.pendientes:   # cada factura sale de la lista solo cuando ya está en la base de datos
+                r = self.pendientes[0]
+                datos = {k: v for k, v in r.items() if k != "_huella"}
+                guardar_factura_procesada(**datos)
+                self.pendientes.pop(0)
+                if r.get("_huella"):
+                    marcar_documento_visto(self.tenant_id, r["_huella"])
         except Exception:
             self.excels = {}   # el Excel ya está subido: se vuelve a leer del almacenamiento y el reintento no duplica filas
             raise
@@ -233,7 +248,8 @@ def _registradas(tenant_id, cif_empresa):
 def _marcar_visto(tenant_id, huella):
     lote = _LOTE.get()
     if lote:
-        lote.huellas.append(huella)   # se marca cuando el Excel ya está subido
+        if not lote.huella_pendiente(huella):   # si su factura aún espera a subirse, la huella viaja con ella
+            marcar_documento_visto(tenant_id, huella)
     else:
         marcar_documento_visto(tenant_id, huella)
 
@@ -339,6 +355,8 @@ def _archivar_con_reparacion(storage, tenant_id, contenido, nombre_original, fac
         # Una carpeta guardada ya no existe en OneDrive (alguien la borró o la movió):
         # se recrean las que falten y se reintenta UNA vez, sin volver a llamar a la IA.
         log.warning("Carpeta no encontrada en el almacenamiento; se recrean y se reintenta")
+        if _LOTE.get():
+            _LOTE.get().descartar()
         preparar_gestoria(storage, tenant_id)
         cif = _normaliza_cif(((factura.get("destinatario") or {}).get("cif_nif")))
         empresa = resolver_empresa_cliente_por_cif(tenant_id, [cif]) if cif else None
@@ -689,6 +707,7 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
                     log.info("'%s' %s: ya leída hace poco, se salta", nombre_original, rango)
                     resultados.append({"accion": "ya_visto"})
                     continue
+                lote.huella_actual = huella
                 extraer_parte = (lambda _c, f=leida: f) if leida is not None else extraer
                 res = procesar_documento(storage, tenant_id, parte, nombre_parte, extraer=extraer_parte, diferir_dudosas=True)
                 if res.get("accion") != "en_espera" and not res.get("lectura_fallida"):
@@ -717,6 +736,7 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
                                "destinatario": {**(factura.get("destinatario") or {}), "cif_nif": cif_lote}}
                     forzar = "no se leyó el CIF del comprador; asignada a la empresa del resto del lote"
             try:
+                lote.huella_actual = _huella(parte)
                 resultados[posicion] = _archivar_con_reparacion(storage, tenant_id, parte, nombre_parte, factura,
                                                                 forzar_revision=forzar)
                 if not factura.get("_lectura_fallida"):
@@ -726,6 +746,8 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
                 primer_error = primer_error or e
                 resultados[posicion] = {"accion": "error"}
         lote.vaciar()   # sube lo que quede por subir y solo entonces lo apunta en la base de datos
+        if lote.descartadas and not primer_error:
+            primer_error = RuntimeError(f"{lote.descartadas} facturas no llegaron a guardarse (faltaba una carpeta); se repite el archivo")
     except BaseException:
         try:
             lote.vaciar()   # lo ya hecho (p. ej. si la IA se cae a mitad de archivo) queda anotado; si esto falla, se repite el archivo
