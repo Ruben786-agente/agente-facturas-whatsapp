@@ -163,3 +163,61 @@ def anadir_factura_a_excel(contenido_existente, cif_empresa, nombre_empresa, per
     buffer = BytesIO()
     wb.save(buffer)
     return buffer.getvalue(), {"ok": True, "tipo": tipo}
+
+
+def _clave_orden(fila, posicion):
+    """Orden de las filas de una hoja: por fecha de factura y luego por número (AC-9 antes que AC-10); a igualdad, como estaban."""
+    import re
+    from datetime import datetime
+    fecha = fila[1]
+    try:
+        f = datetime.strptime(str(fecha).strip(), "%d/%m/%Y") if isinstance(fecha, str) else datetime(fecha.year, fecha.month, fecha.day)
+    except (ValueError, AttributeError, TypeError):
+        f = datetime.max
+    num = str(fila[2] or "")
+    trozos = [(0, int(t), "") if t.isdigit() else (1, 0, t.lower()) for t in re.findall(r"\d+|\D+", num)]
+    return (f, trozos, posicion)
+
+
+def ordenar_filas(contenido):
+    """Devuelve el Excel con las filas de COMPRAS y VENTAS ordenadas por fecha y número de factura."""
+    wb = load_workbook(BytesIO(contenido))
+    for nombre in ("COMPRAS", "VENTAS"):
+        if nombre not in wb.sheetnames:
+            continue
+        ws = wb[nombre]
+        filas = []
+        for r in range(4, ws.max_row + 1):
+            valores = [ws.cell(row=r, column=c).value for c in range(1, len(CABECERAS) + 1)]
+            if any(v not in (None, "") for v in valores):
+                filas.append(valores)
+        ordenadas = [f for _, f in sorted(((_clave_orden(f, i), f) for i, f in enumerate(filas)), key=lambda x: x[0])]
+        if ordenadas == filas:
+            continue
+        for i, valores in enumerate(ordenadas):
+            for c, v in enumerate(valores, start=1):
+                celda = _escribe_celda(ws, 4 + i, c, v)
+                if c in FORMATOS_NUMERO:
+                    celda.number_format = FORMATOS_NUMERO[c]
+                if c == COLUMNA_TEXTO_FACTURA:
+                    celda.number_format = "@"
+    buffer = BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def excel_contiene(contenido, num_factura, total):
+    """True si alguna fila del Excel ya tiene esa factura (mismo número y total): evita duplicar al reintentar tras un corte."""
+    wb = load_workbook(BytesIO(contenido), read_only=True)
+    num = str(num_factura or "").strip()
+    for nombre in ("COMPRAS", "VENTAS"):
+        if nombre not in wb.sheetnames:
+            continue
+        for fila in wb[nombre].iter_rows(min_row=4, values_only=True):
+            if fila and len(fila) >= 19 and str(fila[2] or "").strip() == num:
+                try:
+                    if abs(float(fila[18] or 0) - float(total or 0)) <= 0.01:
+                        return True
+                except (TypeError, ValueError):
+                    pass
+    return False

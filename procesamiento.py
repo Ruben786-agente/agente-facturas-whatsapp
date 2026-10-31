@@ -143,7 +143,7 @@ def _guardar_ticket(storage, tenant_id, empresa, nombre, contenido, factura):
 def _se_parece_a_una_anotada(tenant_id, empresa, factura, numero, cif_emisor, total):
     """Casi-duplicados que el control exacto no ve. Devuelve el motivo, o None si no hay nada sospechoso."""
     nombre = _palabras((factura.get("emisor") or {}).get("nombre"))
-    for f in obtener_facturas_ya_registradas(tenant_id, empresa["cif_nif"]):
+    for f in _registradas(tenant_id, empresa["cif_nif"]):
         if f.get("destino") != "PROCESADA" or f["num_factura"] != numero:
             continue
         cif_f = _normaliza_cif(f["emisor"].get("cif_nif"))
@@ -155,13 +155,84 @@ def _se_parece_a_una_anotada(tenant_id, empresa, factura, numero, cif_emisor, to
     return None
 
 
+import contextvars
+_LOTE = contextvars.ContextVar("lote_excel", default=None)
+TAMANO_TANDA = 15
+
+
+class _LoteExcel:
+    """
+    Un PDF con muchas facturas: en vez de bajar y subir el Excel por cada factura, se baja una vez, se van añadiendo las filas en memoria y se
+    sube cada TAMANO_TANDA facturas (y al final), ordenado por fecha y número. Hasta que el Excel no está subido NO se apunta nada en la base
+    de datos ni se marca el documento como leído: si algo falla, se repite la tanda sin perder ni duplicar facturas.
+    """
+    def __init__(self, storage, tenant_id, tamano=None):
+        self.storage, self.tenant_id, self.tamano = storage, tenant_id, tamano or TAMANO_TANDA
+        self.excels, self.pendientes, self.huellas = {}, [], []
+
+    def excel(self, carpeta_id, nombre):
+        clave = (carpeta_id, nombre)
+        if clave not in self.excels:
+            existente = self.storage.buscar_archivo_por_nombre(carpeta_id, nombre)
+            self.excels[clave] = {"contenido": self.storage.descargar_archivo(existente.id) if existente else None, "sucio": False}
+        return self.excels[clave]["contenido"]
+
+    def anotar(self, carpeta_id, nombre, nuevo_excel, registro):
+        e = self.excels[(carpeta_id, nombre)]
+        e["contenido"], e["sucio"] = nuevo_excel, True
+        self.pendientes.append(registro)
+        if len(self.pendientes) >= self.tamano:
+            self.vaciar()
+
+    def registradas(self, cif_empresa):
+        return [{"tenant_id": self.tenant_id, "cif_empresa_cliente": cif_empresa, "num_factura": r["num_factura"],
+                 "fecha_factura": r["fecha_factura"], "emisor": {"cif_nif": r["proveedor_cif"] or "", "nombre": r["proveedor_nombre"] or ""},
+                 "total_factura": float(r["total_factura"]), "destino": "PROCESADA"}
+                for r in self.pendientes if r["cif_empresa_cliente"] == cif_empresa]
+
+    def vaciar(self):
+        from generar_excel_mieos import ordenar_filas
+        for (carpeta_id, nombre), e in self.excels.items():
+            if e["sucio"]:
+                try:
+                    ordenado = ordenar_filas(e["contenido"])
+                except Exception:
+                    log.exception("No se pudo ordenar %s; se sube sin ordenar", nombre)
+                    ordenado = e["contenido"]
+                self.storage.subir_archivo(carpeta_id, nombre, ordenado)
+                e["contenido"], e["sucio"] = ordenado, False
+        pendientes, huellas = self.pendientes, self.huellas
+        self.pendientes, self.huellas = [], []
+        try:
+            for r in pendientes:
+                guardar_factura_procesada(**r)
+            for h in huellas:
+                marcar_documento_visto(self.tenant_id, h)
+        except Exception:
+            self.excels = {}   # el Excel ya está subido: se vuelve a leer del almacenamiento y el reintento no duplica filas
+            raise
+
+
+def _registradas(tenant_id, cif_empresa):
+    lote = _LOTE.get()
+    return obtener_facturas_ya_registradas(tenant_id, cif_empresa) + (lote.registradas(cif_empresa) if lote else [])
+
+
+def _marcar_visto(tenant_id, huella):
+    lote = _LOTE.get()
+    if lote:
+        lote.huellas.append(huella)   # se marca cuando el Excel ya está subido
+    else:
+        marcar_documento_visto(tenant_id, huella)
+
+
 def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, reintento=False):
     numero = (factura.get("num_factura") or "").strip()
     cif_emisor = _normaliza_cif((factura.get("emisor") or {}).get("cif_nif"))
     total = factura.get("total_factura") or 0
 
     if numero:
-        for f in obtener_facturas_ya_registradas(tenant_id, empresa["cif_nif"]):
+        for f in _registradas(tenant_id, empresa["cif_nif"]):
             if (f.get("destino") == "PROCESADA" and f["num_factura"] == numero
                     and _normaliza_cif(f["emisor"].get("cif_nif")) == cif_emisor
                     and abs(f["total_factura"] - total) <= 0.01):
@@ -180,13 +251,24 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, re
         return _a_revision(storage, tenant_id, empresa, nombre, contenido, factura, "fecha de la factura ilegible")
 
     nombre_excel = nombre_del_excel(empresa["cif_nif"], periodo)
-    existente = storage.buscar_archivo_por_nombre(empresa["carpeta_excel_id"], nombre_excel)
-    contenido_excel = storage.descargar_archivo(existente.id) if existente else None
+    lote = _LOTE.get()
+    if lote:
+        contenido_excel = lote.excel(empresa["carpeta_excel_id"], nombre_excel)
+    else:
+        existente = storage.buscar_archivo_por_nombre(empresa["carpeta_excel_id"], nombre_excel)
+        contenido_excel = storage.descargar_archivo(existente.id) if existente else None
 
     nuevo_excel, resultado = anadir_factura_a_excel(
         contenido_excel, cif_empresa=empresa["cif_nif"], nombre_empresa=empresa["nombre"],
         periodo=periodo, factura=factura,
     )
+    if resultado["ok"] and contenido_excel and numero:
+        try:   # corte justo después de subir el Excel y antes de apuntar en la base de datos: la fila ya está, no se repite
+            from generar_excel_mieos import excel_contiene
+            if excel_contiene(contenido_excel, numero, total):
+                nuevo_excel = contenido_excel
+        except Exception:
+            log.exception("No se pudo comprobar si la factura ya estaba en el Excel")
     if not resultado["ok"]:
         if reintento:
             return {"accion": "revision", "motivo": resultado["motivo"]}
@@ -194,14 +276,18 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, re
 
     if contenido is not None:
         storage.subir_archivo(empresa["carpeta_facturas_id"], nombre, contenido)
-    storage.subir_archivo(empresa["carpeta_excel_id"], nombre_excel, nuevo_excel)
-    guardar_factura_procesada(
+    registro = dict(
         tenant_id=tenant_id, cif_empresa_cliente=empresa["cif_nif"], tipo_documento="factura_completa",
         num_factura=numero or "(sin número)", fecha_factura=factura["fecha_factura"],
         proveedor_cif=(factura.get("emisor") or {}).get("cif_nif"),
         proveedor_nombre=((factura.get("emisor") or {}).get("nombre") or "").strip() or "(desconocido)",
         total_factura=total, destino="PROCESADA",
     )
+    if lote:
+        lote.anotar(empresa["carpeta_excel_id"], nombre_excel, nuevo_excel, registro)
+    else:
+        storage.subir_archivo(empresa["carpeta_excel_id"], nombre_excel, nuevo_excel)
+        guardar_factura_procesada(**registro)
     return {"accion": "procesada", "empresa": empresa["nombre"], "cif": empresa["cif_nif"], "excel": nombre_excel}
 
 
@@ -572,58 +658,70 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
     except Exception:
         log.exception("No se pudo comprobar si el emisor del lote es un cliente")
 
-    resultados, primer_error, en_espera = [], None, []
-    for indice, (grupo, parte, leida) in enumerate(zip(grupos, partes, leidas)):
-        if parar and parar():
-            # La gestoría canceló: lo ya anotado se queda; el resto no se toca (y las lecturas hechas no se archivan).
-            resultados.extend({"accion": "cancelada"} for _ in range(len(partes) - indice))
-            break
-        if progreso:
-            progreso("guardando", indice, len(partes))
-        rango = f"p{grupo[0]}" if len(grupo) == 1 else f"p{grupo[0]}-{grupo[-1]}"
-        nombre_parte = f"{base}_{rango}.pdf"
-        try:
-            huella = _huella(parte)
-            if documento_ya_visto(tenant_id, huella):  # reintento de un correo: esta parte ya se leyó
-                log.info("'%s' %s: ya leída hace poco, se salta", nombre_original, rango)
-                resultados.append({"accion": "ya_visto"})
+    lote = _LoteExcel(storage, tenant_id)
+    token = _LOTE.set(lote)
+    try:
+        resultados, primer_error, en_espera = [], None, []
+        for indice, (grupo, parte, leida) in enumerate(zip(grupos, partes, leidas)):
+            if parar and parar():
+                # La gestoría canceló: lo ya anotado se queda; el resto no se toca (y las lecturas hechas no se archivan).
+                resultados.extend({"accion": "cancelada"} for _ in range(len(partes) - indice))
+                break
+            if progreso:
+                progreso("guardando", indice, len(partes))
+            rango = f"p{grupo[0]}" if len(grupo) == 1 else f"p{grupo[0]}-{grupo[-1]}"
+            nombre_parte = f"{base}_{rango}.pdf"
+            try:
+                huella = _huella(parte)
+                if documento_ya_visto(tenant_id, huella):  # reintento de un correo: esta parte ya se leyó
+                    log.info("'%s' %s: ya leída hace poco, se salta", nombre_original, rango)
+                    resultados.append({"accion": "ya_visto"})
+                    continue
+                extraer_parte = (lambda _c, f=leida: f) if leida is not None else extraer
+                res = procesar_documento(storage, tenant_id, parte, nombre_parte, extraer=extraer_parte, diferir_dudosas=True)
+                if res.get("accion") != "en_espera" and not res.get("lectura_fallida"):
+                    _marcar_visto(tenant_id, huella)
+            except ServicioIANoDisponible:
+                raise   # se para todo el archivo: lo ya leído queda marcado como visto y el resto se lee cuando vuelva el servicio
+            except Exception as e:
+                log.exception("Fallo procesando %s de '%s'", rango, nombre_original)
+                primer_error = primer_error or e
                 continue
-            extraer_parte = (lambda _c, f=leida: f) if leida is not None else extraer
-            res = procesar_documento(storage, tenant_id, parte, nombre_parte, extraer=extraer_parte, diferir_dudosas=True)
-            if res.get("accion") != "en_espera" and not res.get("lectura_fallida"):
-                marcar_documento_visto(tenant_id, huella)
-        except ServicioIANoDisponible:
-            raise   # se para todo el archivo: lo ya leído queda marcado como visto y el resto se lee cuando vuelva el servicio
-        except Exception as e:
-            log.exception("Fallo procesando %s de '%s'", rango, nombre_original)
-            primer_error = primer_error or e
-            continue
-        if res.get("accion") == "en_espera":
-            en_espera.append((len(resultados), parte, nombre_parte, res["factura"], res.get("razon")))
-        resultados.append(res)
+            if res.get("accion") == "en_espera":
+                en_espera.append((len(resultados), parte, nombre_parte, res["factura"], res.get("razon")))
+            resultados.append(res)
 
-    # Segunda vuelta, ya con el lote entero procesado:
-    #  - lectura dudosa de una empresa desconocida: otra factura del lote pudo crearla ya;
-    #  - factura sin CIF del comprador: si todas las demás del lote son de una única empresa,
-    #    se asigna a ella, pero siempre a Revisión para que la gestoría lo confirme.
-    empresas_del_lote = {r["cif"] for r in resultados if r.get("cif")}
-    for posicion, parte, nombre_parte, factura, razon in en_espera:
-        forzar = None
-        if razon == "sin_cif":
-            if len(empresas_del_lote) == 1:
-                cif_lote = next(iter(empresas_del_lote))
-                factura = {**factura, "sin_cif_destinatario": False,
-                           "destinatario": {**(factura.get("destinatario") or {}), "cif_nif": cif_lote}}
-                forzar = "no se leyó el CIF del comprador; asignada a la empresa del resto del lote"
+        # Segunda vuelta, ya con el lote entero procesado:
+        #  - lectura dudosa de una empresa desconocida: otra factura del lote pudo crearla ya;
+        #  - factura sin CIF del comprador: si todas las demás del lote son de una única empresa,
+        #    se asigna a ella, pero siempre a Revisión para que la gestoría lo confirme.
+        empresas_del_lote = {r["cif"] for r in resultados if r.get("cif")}
+        for posicion, parte, nombre_parte, factura, razon in en_espera:
+            forzar = None
+            if razon == "sin_cif":
+                if len(empresas_del_lote) == 1:
+                    cif_lote = next(iter(empresas_del_lote))
+                    factura = {**factura, "sin_cif_destinatario": False,
+                               "destinatario": {**(factura.get("destinatario") or {}), "cif_nif": cif_lote}}
+                    forzar = "no se leyó el CIF del comprador; asignada a la empresa del resto del lote"
+            try:
+                resultados[posicion] = _archivar_con_reparacion(storage, tenant_id, parte, nombre_parte, factura,
+                                                                forzar_revision=forzar)
+                if not factura.get("_lectura_fallida"):
+                    _marcar_visto(tenant_id, _huella(parte))
+            except Exception as e:
+                log.exception("Fallo en la segunda vuelta de %s", nombre_parte)
+                primer_error = primer_error or e
+                resultados[posicion] = {"accion": "error"}
+        lote.vaciar()   # sube lo que quede por subir y solo entonces lo apunta en la base de datos
+    except BaseException:
         try:
-            resultados[posicion] = _archivar_con_reparacion(storage, tenant_id, parte, nombre_parte, factura,
-                                                            forzar_revision=forzar)
-            if not factura.get("_lectura_fallida"):
-                marcar_documento_visto(tenant_id, _huella(parte))
-        except Exception as e:
-            log.exception("Fallo en la segunda vuelta de %s", nombre_parte)
-            primer_error = primer_error or e
-            resultados[posicion] = {"accion": "error"}
+            lote.vaciar()   # lo ya hecho (p. ej. si la IA se cae a mitad de archivo) queda anotado; si esto falla, se repite el archivo
+        except Exception:
+            log.exception("No se pudo cerrar la tanda del Excel de '%s'", nombre_original)
+        raise
+    finally:
+        _LOTE.reset(token)
     if primer_error:
         raise primer_error
     return resultados
