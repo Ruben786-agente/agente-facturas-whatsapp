@@ -308,8 +308,8 @@ PLANTILLA_PRIVACIDAD = _legal("Política de privacidad", """
 <table>
 <tr><th>Proveedor</th><th>Para qué</th><th>Ubicación</th></tr>
 <tr><td>Anthropic</td><td>Lectura de los documentos mediante inteligencia artificial</td><td>EE. UU.</td></tr>
-<tr><td>Render</td><td>Alojamiento de la aplicación</td><td>[PENDIENTE: región]</td></tr>
-<tr><td>Supabase</td><td>Base de datos</td><td>UE (París)</td></tr>
+<tr><td>Render</td><td>Alojamiento de la aplicación</td><td>UE (Fráncfort, Alemania)</td></tr>
+<tr><td>Supabase</td><td>Base de datos</td><td>UE (Irlanda)</td></tr>
 <tr><td>Stripe</td><td>Pagos y suscripciones</td><td>UE / EE. UU.</td></tr>
 <tr><td>Resend</td><td>Envío de avisos por correo</td><td>EE. UU.</td></tr>
 <tr><td>Microsoft y Google</td><td>Correo y almacenamiento que usted mismo conecta</td><td>Según su cuenta</td></tr>
@@ -357,7 +357,7 @@ PLANTILLA_ENCARGO = _legal("Contrato de encargo del tratamiento", """
 </ul>
 
 <h2>4. Subencargados autorizados</h2>
-<p>El Cliente autoriza con carácter general a los siguientes subencargados, que ofrecen garantías equivalentes: Anthropic (lectura mediante inteligencia artificial, EE. UU.), Render (alojamiento) y Supabase (base de datos, UE). El Prestador informará de cualquier cambio con antelación suficiente para que el Cliente pueda oponerse. Las transferencias internacionales se amparan en el Marco de Privacidad de Datos UE-EE. UU. o en cláusulas contractuales tipo.</p>
+<p>El Cliente autoriza con carácter general a los siguientes subencargados, que ofrecen garantías equivalentes: Anthropic (lectura mediante inteligencia artificial, EE. UU.), Render (alojamiento, UE: Fráncfort) y Supabase (base de datos, UE: Irlanda). El Prestador informará de cualquier cambio con antelación suficiente para que el Cliente pueda oponerse. Las transferencias internacionales se amparan en el Marco de Privacidad de Datos UE-EE. UU. o en cláusulas contractuales tipo.</p>
 
 <h2>5. Devolución o supresión</h2>
 <p>Al terminar el Servicio, o cuando el Cliente lo pida, el Prestador suprimirá los datos que conserve. El Cliente puede hacerlo en cualquier momento desde el panel («Eliminar mi cuenta y mis datos»). Los archivos originales y los Excel están en el almacenamiento del propio Cliente y no se tocan.</p>
