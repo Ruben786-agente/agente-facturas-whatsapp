@@ -39,6 +39,8 @@ class Gestoria(Base):
     alta_automatica = Column(Boolean, nullable=False, default=True, server_default="1")  # dar de alta clientes nuevos con la primera factura
     activa = Column(Boolean, nullable=False, default=True)
     creada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    terminos_version = Column(String)                       # versión de los textos legales que aceptó al registrarse
+    terminos_aceptados_en = Column(DateTime(timezone=True))  # y cuándo
 
     credenciales = relationship("CredencialAlmacenamiento", backref="gestoria")
     empresas = relationship("EmpresaCliente", backref="gestoria")
@@ -285,6 +287,15 @@ def _anadir_columnas_nuevas(motor):
                 conexion.execute(text("ALTER TABLE gestorias ADD COLUMN alta_automatica BOOLEAN NOT NULL DEFAULT TRUE"))
     except Exception:
         log.exception("No se pudo añadir la columna alta_automatica a las gestorías")
+    try:
+        columnas = {c["name"] for c in inspect(motor).get_columns("gestorias")}
+        with motor.begin() as conexion:
+            if "terminos_version" not in columnas:
+                conexion.execute(text("ALTER TABLE gestorias ADD COLUMN terminos_version VARCHAR"))
+            if "terminos_aceptados_en" not in columnas:
+                conexion.execute(text("ALTER TABLE gestorias ADD COLUMN terminos_aceptados_en TIMESTAMP WITH TIME ZONE"))
+    except Exception:
+        log.exception("No se pudieron añadir las columnas de aceptación de condiciones")
     try:
         columnas = {c["name"] for c in inspect(motor).get_columns("empresas_cliente")}
         if "periodicidad" not in columnas:
@@ -951,6 +962,19 @@ def crear_gestoria_prueba(nombre, email_contacto, dias_prueba=14):
         session.add(gestoria)
         session.commit()
         return gestoria.tenant_id
+    finally:
+        session.close()
+
+
+def registrar_aceptacion_terminos(tenant_id, version):
+    """Deja constancia de qué versión de las condiciones, la privacidad y el encargo aceptó la gestoría, y cuándo."""
+    session = _obtener_session()
+    try:
+        g = session.get(Gestoria, tenant_id)
+        if g:
+            g.terminos_version = version
+            g.terminos_aceptados_en = datetime.now(timezone.utc)
+            session.commit()
     finally:
         session.close()
 

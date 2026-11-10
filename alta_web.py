@@ -18,7 +18,7 @@ from flask import Blueprint, redirect, render_template_string, request, session,
 import autenticacion_google as google
 import autenticacion_onedrive as microsoft
 from almacenamiento import obtener_almacenamiento
-from basededatos import (crear_gestoria_prueba, establecer_password, existe_email_gestoria,
+from basededatos import (crear_gestoria_prueba, registrar_aceptacion_terminos, establecer_password, existe_email_gestoria,
                          guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial,
                          eliminar_gestoria, email_de_gestoria, obtener_suscripcion_stripe, verificar_login,
                          obtener_periodicidad, guardar_periodicidad)
@@ -237,6 +237,11 @@ def registro():
         if error:
             return render_template_string(PLANTILLA_REGISTRO, error=error)
         tenant_id = crear_gestoria_prueba(nombre, email)
+        try:   # constancia de lo que aceptó; si falla, no impide crear la cuenta
+            from publico_web import VERSION_LEGAL
+            registrar_aceptacion_terminos(tenant_id, VERSION_LEGAL)
+        except Exception:
+            log.exception("No se pudo registrar la aceptación de las condiciones")
         establecer_password(tenant_id, password)
         session.clear()
         session["tenant_id"] = tenant_id

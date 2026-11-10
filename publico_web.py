@@ -130,6 +130,7 @@ PIE = (
     '<a href="{{ url_for(\'publico.terminos\') }}">Condiciones del servicio</a>'
     '<a href="{{ url_for(\'publico.privacidad\') }}">Privacidad</a>'
     '<a href="{{ url_for(\'publico.encargo\') }}">Encargo del tratamiento</a>'
+    '<a href="{{ url_for(\'publico.aviso_legal\') }}">Aviso legal</a>'
     '<span class="resto">Contacto: <a href="mailto:{{ d.email }}">{{ d.email }}</a></span>'
     '</div></footer>'
 )
@@ -367,6 +368,27 @@ PLANTILLA_ENCARGO = _legal("Contrato de encargo del tratamiento", """
 """, "Contrato de encargo del tratamiento de datos (art. 28 RGPD) entre la gestoría y Agente Facturas.", "/encargo")
 
 
+PLANTILLA_AVISO = _legal("Aviso legal", """
+<h1>Aviso legal</h1>
+<p class="version">Versión {{ d.version }}</p>
+<h2>1. Titular del sitio web</h2>
+<p>En cumplimiento del artículo 10 de la Ley 34/2002, de servicios de la sociedad de la información y de comercio electrónico, se informa de que este sitio web, {{ d.url }}, es titularidad de {{ d.nombre }}, con NIF {{ d.nif }} y domicilio en {{ d.domicilio }}. Contacto: <a href="mailto:{{ d.email }}">{{ d.email }}</a>.</p>
+<h2>2. Objeto</h2>
+<p>Este sitio presenta y permite contratar el servicio «Agente Facturas», dirigido a gestorías y profesionales. Su uso se rige por las <a href="{{ url_for('publico.terminos') }}">Condiciones del servicio</a> y la <a href="{{ url_for('publico.privacidad') }}">Política de privacidad</a>.</p>
+<h2>3. Propiedad intelectual</h2>
+<p>El software, el diseño y los textos del sitio pertenecen al titular. No se permite su reproducción sin autorización, salvo la que la ley permita.</p>
+<h2>4. Responsabilidad</h2>
+<p>El titular procura que la información del sitio sea correcta y esté actualizada, pero no garantiza que no haya errores ni interrupciones. No responde de los enlaces a sitios de terceros.</p>
+<h2>5. Ley aplicable</h2>
+<p>Este aviso se rige por la ley española. Para cualquier controversia, los juzgados y tribunales de {{ d.jurisdiccion }}, salvo que la ley imponga otro fuero.</p>
+""", "Aviso legal de Agente Facturas: titular del sitio web y datos de contacto.", "/aviso-legal")
+
+
+@bp_publico.route("/aviso-legal")
+def aviso_legal():
+    return _render(PLANTILLA_AVISO)
+
+
 @bp_publico.route("/terminos")
 def terminos():
     return _render(PLANTILLA_TERMINOS)
@@ -398,7 +420,7 @@ def robots():
 @bp_publico.route("/sitemap.xml")
 def sitemap():
     base = _datos()["url"]
-    rutas = ["/", "/registro", "/login", "/terminos", "/privacidad", "/encargo"]
+    rutas = ["/", "/registro", "/login", "/terminos", "/privacidad", "/encargo", "/aviso-legal"]
     cuerpo = "".join(f"<url><loc>{base}{r}</loc></url>" for r in rutas)
     return Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                     + cuerpo + "</urlset>", mimetype="application/xml")
