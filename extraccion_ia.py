@@ -275,6 +275,21 @@ def _fiable(datos: dict) -> bool:
     return _cuadra(datos) and not problemas_factura(datos)
 
 
+def _motivo_duda(r: dict) -> str:
+    """Texto corto con la razón por la que una lectura se considera dudosa (solo para los registros: no cambia ninguna decisión)."""
+    try:
+        from validaciones import problemas_factura
+        motivos = []
+        if r.get("confianza") != "alta":
+            motivos.append(f"confianza={r.get('confianza')}")
+        if not (r.get("es_factura_simplificada") or r.get("formato_ticket_tpv")) and not _cuadra(r):
+            motivos.append("no cuadra")
+        motivos += [f"problema: {x}" for x in (problemas_factura(r) or [])]
+        return "; ".join(str(m) for m in motivos) or "sin motivo claro"
+    except Exception as e:
+        return f"no se pudo calcular ({e})"
+
+
 MAX_RELECTURAS_CIF = 2
 
 
@@ -351,11 +366,12 @@ def extraer_factura(contenido: bytes) -> dict:
     """Lectura normal y, si MODELO_ESCALADO está definido y la factura sigue dudosa, una última lectura con ese modelo (más potente)."""
     resultado = _extraer_factura_base(contenido)
     if MODELO_ESCALADO and _sigue_dudosa(resultado):
+        log.info("Pasa al modelo de refuerzo (%s)", _motivo_duda(resultado))
         otra = _leer(contenido, MODELO_ESCALADO)
         if not otra.get("_lectura_fallida") and otra.get("es_documento_fiscal") is not False and not _sigue_dudosa(otra):
             log.info("Lectura de refuerzo con %s: resuelve la duda", MODELO_ESCALADO)
             return {**otra, "relectura": "modelo_superior"}
-        log.info("Lectura de refuerzo con %s: sigue dudosa", MODELO_ESCALADO)
+        log.info("Lectura de refuerzo con %s: sigue dudosa (%s)", MODELO_ESCALADO, _motivo_duda(otra))
     return resultado
 
 
@@ -372,7 +388,7 @@ def _extraer_factura_base(contenido: bytes) -> dict:
             if not _debe_verificarse(rapida):
                 return rapida
             return _acordar(rapida, _leer(contenido))          # segunda opinión del modelo principal
-        log.info("Lectura rápida dudosa: se repite con el modelo principal")
+        log.info("Lectura rápida dudosa (%s): se repite con el modelo principal", _motivo_duda(rapida))
         resultado = _extraer_con_modelo_principal(contenido)
         return _acordar(resultado, rapida) if _debe_verificarse(resultado) else resultado
 
