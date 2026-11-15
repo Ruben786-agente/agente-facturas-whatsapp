@@ -21,7 +21,7 @@ LETRAS_NIF = "TRWAGMYFPDXBNJZSQVHLCKE"
 LETRAS_CIF = "JABCDEFGHI"
 IVA_VALIDOS = {0.0, 4.0, 5.0, 10.0, 21.0}
 RECARGO_DE = {21.0: (5.2,), 10.0: (1.4,), 5.0: (0.62, 0.625), 4.0: (0.5,), 0.0: (0.0,)}  # el 5 % lleva 0,62 %, y muchas facturas imprimen 0,625
-# Operaciones que no son una compra o venta normal: hoy el Excel deja en blanco el tipo de operación, así que se revisan a mano.
+# Operaciones que no son una compra o venta normal: la importación por Excel de miEOS solo admite compras y ventas (la gestoría confirma que el tipo de operación se fuerza a mano en el asiento), así que se revisan a mano.
 OPERACIONES_A_REVISAR = {
     "intracomunitaria": "operación intracomunitaria (otro país de la UE)",
     "importacion": "importación (proveedor de fuera de la UE)",
@@ -103,7 +103,7 @@ def problemas_factura(factura, hoy=None):
             problemas.append(f"la factura está en {moneda}: hay que convertirla a euros antes de anotarla")
         operacion = (factura.get("tipo_operacion") or "interior").strip().lower()
         if operacion in OPERACIONES_A_REVISAR:
-            problemas.append(f"{OPERACIONES_A_REVISAR[operacion]}: el Excel necesita indicar el tipo de operación, revísela")
+            problemas.append(f"{OPERACIONES_A_REVISAR[operacion]}: el Excel de miEOS solo admite compras y ventas normales, esta operación hay que marcarla a mano en el asiento")
 
     for d in factura.get("desgloses") or []:
         base, cuota, pct = _dinero(d.get("base")), _dinero(d.get("cuota_iva")), _dinero(d.get("pct_iva"))
