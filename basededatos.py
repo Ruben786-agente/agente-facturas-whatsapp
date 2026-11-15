@@ -919,6 +919,78 @@ def huecos_de_serie(tenant_id, cif_empresa, desde):
         session.close()
 
 
+def obtener_informe_periodo(tenant_id, cif_empresa, clave):
+    """
+    Informe de comprobación de un cliente y periodo (clave '2026-03' en mensual o '2026-T1' en trimestral), a petición del usuario.
+    Cuenta lo que hay en cada estado, suma importes, avisa de huecos en la numeración de las ventas del cliente y de posibles duplicados,
+    y lista lo dudoso con su motivo. Devuelve None si el cliente o el periodo no son válidos.
+    """
+    import re
+    m = re.match(r"^(\d{4})-(?:T([1-4])|(0[1-9]|1[0-2]))$", (clave or "").strip())
+    if not m:
+        return None
+    anio = int(m.group(1))
+    trimestre = int(m.group(2)) if m.group(2) else None
+    mes = int(m.group(3)) if m.group(3) else None
+    cif = "".join(ch for ch in (cif_empresa or "") if ch.isalnum()).upper()
+    session = _obtener_session()
+    try:
+        empresa = session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, cif_nif=cif_empresa).first()
+        if not empresa:
+            return None
+        filas = [f for f in session.query(FacturaCache).filter_by(tenant_id=tenant_id, empresa_cliente_id=empresa.id).all()
+                 if f.fecha_factura.year == anio and (f.fecha_factura.month == mes if mes else (f.fecha_factura.month - 1) // 3 + 1 == trimestre)]
+        todas = session.query(FacturaCache).filter_by(tenant_id=tenant_id, empresa_cliente_id=empresa.id).all()
+
+        def _es_propia(f):
+            return "".join(ch for ch in (f.proveedor_cif or "") if ch.isalnum()).upper() == cif
+
+        buenas = [f for f in filas if f.destino in ("PROCESADA", "REVISADA")]
+        ventas = [f for f in buenas if _es_propia(f)]
+        compras = [f for f in buenas if not _es_propia(f)]
+        suma = lambda lista: round(sum(float(f.total_factura) for f in lista), 2)
+
+        series = {}
+        for f in ventas:
+            p = _partir_numero(f.num_factura)
+            if p:
+                series.setdefault((p[0], p[2]), {"lote": set(), "ancho": p[3]})["lote"].add(p[1])
+                series[(p[0], p[2])]["ancho"] = max(series[(p[0], p[2])]["ancho"], p[3])
+        registrados = {}
+        for f in todas:
+            p = _partir_numero(f.num_factura)
+            if p and _es_propia(f):
+                registrados.setdefault((p[0], p[2]), set()).add(p[1])
+        huecos = []
+        for (pre, suf), d in sorted(series.items()):
+            if len(d["lote"]) < 2:
+                continue
+            lo, hi = min(d["lote"]), max(d["lote"])
+            if hi - lo > 2000:
+                continue
+            huecos += [f"{pre}{str(n).zfill(d['ancho'])}{suf}" for n in range(lo, hi + 1) if n not in registrados.get((pre, suf), set())]
+
+        vistos, duplicadas = {}, []
+        for f in buenas:
+            k = ((f.num_factura or "").strip().upper(), (f.proveedor_cif or "").strip().upper(), round(float(f.total_factura), 2))
+            vistos[k] = vistos.get(k, 0) + 1
+            if vistos[k] == 2:
+                duplicadas.append(f.num_factura)
+
+        dudosas = [{"id": f.id, "fecha": f.fecha_factura.strftime("%d/%m/%Y"), "num": f.num_factura,
+                    "proveedor": f.proveedor_nombre or "(desconocido)", "total": float(f.total_factura), "motivo": f.motivo or "",
+                    "corregible": bool(f.datos_json)} for f in filas if f.destino == "REVISION"]
+        return {
+            "empresa": empresa.nombre, "cif": empresa.cif_nif, "clave": clave,
+            "ventas": len(ventas), "ventas_total": suma(ventas), "compras": len(compras), "compras_total": suma(compras),
+            "revisadas": sum(1 for f in filas if f.destino == "REVISADA"),
+            "tickets": sum(1 for f in filas if f.destino == "TICKETS"), "tickets_total": suma([f for f in filas if f.destino == "TICKETS"]),
+            "huecos": huecos[:60], "duplicadas": duplicadas[:40], "dudosas": dudosas,
+        }
+    finally:
+        session.close()
+
+
 def correo_ya_procesado(tenant_id, mensaje_id):
     session = _obtener_session()
     try:

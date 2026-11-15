@@ -237,7 +237,8 @@ PLANTILLA_PANEL = pagina("Panel", """
         <td data-label="En revisión" class="num">{{ c.revision }}</td>
         <td data-label="Estado"><span class="estado {{ c.estado }}">{{ {"LISTO": "Listo para importar", "REVISAR": "Tiene pendientes", "SIN_FACTURAS": "Sin facturas"}[c.estado] }}</span></td>
         <td data-label="Excel">{% if c.facturas %}<div class="acciones"><a class="btn principal" href="{{ url_for('revision.descargar_excel', cif=c.cif, periodo=c.periodo) }}">Descargar Excel</a>
-          <a class="btn discreto" href="{{ url_for('revision.abrir_excel', cif=c.cif, periodo=c.periodo) }}" target="_blank" rel="noopener">Abrir en su carpeta</a></div>{% else %}<span class="sec">-</span>{% endif %}</td>
+          <a class="btn discreto" href="{{ url_for('revision.abrir_excel', cif=c.cif, periodo=c.periodo) }}" target="_blank" rel="noopener">Abrir en su carpeta</a>
+          <a class="btn discreto" href="{{ url_for('revision.informe_comprobacion', cif=c.cif, clave=c.clave) }}">Informe de comprobación</a></div>{% else %}<span class="sec">-</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </table></div>
