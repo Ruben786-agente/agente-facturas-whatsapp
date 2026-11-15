@@ -977,6 +977,26 @@ def obtener_informe_periodo(tenant_id, cif_empresa, clave):
             if vistos[k] == 2:
                 duplicadas.append(f.num_factura)
 
+        def _indice(f):   # nº de periodo (mes o trimestre) contado desde el año 0, para mirar los anteriores
+            return f.fecha_factura.year * 12 + f.fecha_factura.month - 1 if mes else f.fecha_factura.year * 4 + (f.fecha_factura.month - 1) // 3
+        actual = anio * 12 + mes - 1 if mes else anio * 4 + trimestre - 1
+        en_periodo = {"".join(ch for ch in (f.proveedor_cif or "") if ch.isalnum()).upper() for f in filas}
+        previos = {}   # proveedor -> periodos anteriores (de los 3 últimos) en los que mandó factura
+        for f in todas:
+            c = "".join(ch for ch in (f.proveedor_cif or "") if ch.isalnum()).upper()
+            if not c or c == cif or f.destino not in ("PROCESADA", "REVISADA", "REVISION"):
+                continue
+            if actual - 3 <= _indice(f) < actual:
+                d = previos.setdefault(c, {"periodos": set(), "nombre": f.proveedor_nombre or c, "ultima": f})
+                d["periodos"].add(_indice(f))
+                if f.fecha_factura >= d["ultima"].fecha_factura:
+                    d["ultima"] = f
+        faltan_habituales = sorted(
+            [{"nombre": d["nombre"], "cif": c, "veces": len(d["periodos"]), "ultima_fecha": d["ultima"].fecha_factura.strftime("%d/%m/%Y"),
+              "ultimo_total": float(d["ultima"].total_factura)}
+             for c, d in previos.items() if len(d["periodos"]) >= 2 and c not in en_periodo],
+            key=lambda x: (-x["veces"], x["nombre"]))[:30]
+
         dudosas = [{"id": f.id, "fecha": f.fecha_factura.strftime("%d/%m/%Y"), "num": f.num_factura,
                     "proveedor": f.proveedor_nombre or "(desconocido)", "total": float(f.total_factura), "motivo": f.motivo or "",
                     "corregible": bool(f.datos_json)} for f in filas if f.destino == "REVISION"]
@@ -985,7 +1005,7 @@ def obtener_informe_periodo(tenant_id, cif_empresa, clave):
             "ventas": len(ventas), "ventas_total": suma(ventas), "compras": len(compras), "compras_total": suma(compras),
             "revisadas": sum(1 for f in filas if f.destino == "REVISADA"),
             "tickets": sum(1 for f in filas if f.destino == "TICKETS"), "tickets_total": suma([f for f in filas if f.destino == "TICKETS"]),
-            "huecos": huecos[:60], "duplicadas": duplicadas[:40], "dudosas": dudosas,
+            "huecos": huecos[:60], "duplicadas": duplicadas[:40], "dudosas": dudosas, "faltan_habituales": faltan_habituales,
         }
     finally:
         session.close()

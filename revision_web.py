@@ -373,6 +373,28 @@ PLANTILLA_INFORME = pagina("Informe de comprobación", """
   {% if i.duplicadas %}<p class="alerta">Hay más de una factura con el mismo número, proveedor e importe: <strong>{{ i.duplicadas|join(", ") }}</strong>.</p>
   {% else %}<p class="tenue">Ninguna.</p>{% endif %}
 
+  <h2>Posibles facturas que faltan</h2>
+  {% if i.faltan_habituales %}
+  <p class="tenue">Proveedores que mandaron factura en al menos 2 de los 3 periodos anteriores y en este todavía no. Es solo un aviso: puede ser un gasto que no se repite.</p>
+  <div class="tabla"><table class="apilable">
+    <tr><th>Proveedor</th><th class="num">Veces (últimos 3)</th><th>Última factura</th><th class="num">Importe</th></tr>
+    {% for h in i.faltan_habituales %}
+    <tr><td data-label="Proveedor">{{ h.nombre }}<span class="sec">{{ h.cif }}</span></td><td data-label="Veces" class="num">{{ h.veces }}</td>
+      <td data-label="Última factura">{{ h.ultima_fecha }}</td><td data-label="Importe" class="num">{{ h.ultimo_total|eur }}</td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="no-imprimir" style="margin-top:12px;"><button class="btn" type="button" id="copiar-falta">Copiar mensaje para el cliente</button>
+    <span id="copiado" class="tenue" style="margin-left:10px;"></span></p>
+  <textarea id="texto-falta" style="position:absolute;left:-9999px;" readonly>{{ mensaje_falta }}</textarea>
+  <script>
+    document.getElementById('copiar-falta').addEventListener('click', function () {
+      var t = document.getElementById('texto-falta'), aviso = document.getElementById('copiado');
+      t.select();
+      try { document.execCommand('copy'); aviso.textContent = 'Copiado.'; } catch (e) { aviso.textContent = 'No se ha podido copiar; seleccione el texto a mano.'; }
+    });
+  </script>
+  {% else %}<p class="tenue">No se detecta ningún proveedor habitual sin factura (hace falta que haya al menos 2 de los 3 periodos anteriores).</p>{% endif %}
+
   <h2>Facturas dudosas</h2>
   {% if i.dudosas %}
   <div class="tabla"><table class="apilable">
@@ -402,7 +424,58 @@ def informe_comprobacion():
         return redirect(url_for("panel.panel"))
     anio, _, resto = clave.partition("-")
     etiqueta = f"{resto[1:]}T {anio}" if resto.startswith("T") else f"{MESES[int(resto) - 1]} {anio}"
-    return render_template_string(PLANTILLA_INFORME, i=i, etiqueta=etiqueta)
+    mensaje_falta = ""
+    if i["faltan_habituales"]:
+        lineas = "\n".join(f"- {h['nombre']} (la última, del {h['ultima_fecha']}, por {format(h['ultimo_total'], '.2f').replace('.', ',')} €)" for h in i["faltan_habituales"])
+        mensaje_falta = (f"Buenos días. Revisando {etiqueta} de {i['empresa']}, no hemos recibido todavía estas facturas que suelen llegar cada periodo:\n"
+                         f"{lineas}\n¿Nos las puede enviar, o confirmarnos si este periodo no hay? Gracias.")
+    return render_template_string(PLANTILLA_INFORME, i=i, etiqueta=etiqueta, mensaje_falta=mensaje_falta)
+
+
+@bp_revision.route("/descargar/excels")
+@login_requerido
+def descargar_excels():
+    """Descarga en un solo ZIP los Excel de todos los clientes de un periodo (mes o trimestre)."""
+    import time
+    import zipfile
+    from basededatos import obtener_resumen_panel
+    clave = request.args.get("clave", "").strip()
+    tenant_id = session["tenant_id"]
+    datos = obtener_resumen_panel(tenant_id, trimestre=clave or None)
+    clientes = [c for c in datos["clientes"] if c["facturas"] and (not clave or c["clave"] == clave)]
+    if not clientes:
+        flash("No hay Excel que descargar en ese periodo.")
+        return redirect(url_for("panel.panel"))
+    storage = _storage(tenant_id)
+    if not storage:
+        flash("No hay almacenamiento conectado. Conéctelo en Conexiones.")
+        return redirect(url_for("panel.panel"))
+    inicio, buffer, faltan = time.time(), BytesIO(), []
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
+        for c in clientes:
+            if time.time() - inicio > 90:   # el servidor corta las peticiones largas: lo que no cabe se avisa dentro del ZIP
+                faltan.append(f"{c['empresa']} ({c['cif']}): no ha dado tiempo, descárguelo desde el panel")
+                continue
+            try:
+                empresa = resolver_empresa_cliente_por_cif(tenant_id, [c["cif"]])
+                if not empresa or not empresa.get("carpeta_excel_id"):
+                    raise RuntimeError("sin carpeta de Excel")
+                archivo, nombre = None, None
+                for candidato in nombres_excel_posibles(empresa["cif_nif"], periodo_efectivo(tenant_id, empresa["cif_nif"], c["periodo"])):
+                    archivo = storage.buscar_archivo_por_nombre(empresa["carpeta_excel_id"], candidato)
+                    if archivo:
+                        nombre = candidato
+                        break
+                if not archivo:
+                    raise RuntimeError("el Excel ya no está en la carpeta")
+                z.writestr(nombre, storage.descargar_archivo(archivo.id))
+            except Exception as e:
+                log.warning("No se pudo añadir el Excel de un cliente al ZIP: %s", e)
+                faltan.append(f"{c['empresa']} ({c['cif']}): no se ha podido descargar")
+        if faltan:
+            z.writestr("LEEME.txt", "No se han incluido estos Excel:\n" + "\n".join(faltan) + "\n")
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name=f"Excel_{clave or 'todos'}.zip", mimetype="application/zip")
 
 
 @bp_revision.route("/descargar/excel")
