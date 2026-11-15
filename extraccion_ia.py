@@ -50,7 +50,9 @@ ESTRUCTURA (todos los campos son obligatorios):
   "confianza": "alta",
   "es_factura_simplificada": false,
   "sin_cif_destinatario": false,
-  "formato_ticket_tpv": false
+  "formato_ticket_tpv": false,
+  "moneda": "EUR",
+  "tipo_operacion": "interior"
 }
 
 REGLAS:
@@ -76,7 +78,14 @@ REGLAS:
 9. es_factura_simplificada: true si pone "factura simplificada" o equivalente.
    sin_cif_destinatario: true si en ningún sitio aparece el NIF/CIF del comprador.
    formato_ticket_tpv: true si parece un recibo de datáfono/TPV y no una factura formal.
-10. confianza: que el documento sea una foto de papel, con sombras, algo torcido o con la página doblada
+10. moneda: código ISO de la moneda en que están los importes (EUR, USD, GBP...). "EUR" si el documento está en euros
+    o no indica otra moneda.
+11. tipo_operacion: "interior" (venta o compra normal en España, con o sin IVA); "intracomunitaria" (proveedor o cliente de
+    otro país de la UE, normalmente con IVA 0 y la mención de operación intracomunitaria o inversión del sujeto pasivo);
+    "importacion" (proveedor de fuera de la UE); "isp" (inversión del sujeto pasivo dentro de España, p. ej. construcción:
+    solo si lo dice expresamente); "exenta" (exenta de IVA con mención del artículo); "no_sujeta" (no sujeta a IVA).
+    En caso de duda, "interior". No lo deduzcas solo del país ni del nombre del proveedor: tiene que estar en el documento.
+12. confianza: que el documento sea una foto de papel, con sombras, algo torcido o con la página doblada
     NO baja la confianza si todos los datos se leen con claridad. "alta" si todo se lee con claridad; "media" si algún dato secundario es dudoso;
     "baja" si el CIF, los importes o el total no se leen con seguridad, o si la suma de bases
     y cuotas no coincide con el total.
@@ -187,6 +196,8 @@ def _leer(contenido: bytes, modelo=None) -> dict:
         datos.setdefault("es_factura_simplificada", False)
         datos.setdefault("sin_cif_destinatario", not (datos.get("destinatario") or {}).get("cif_nif"))
         datos.setdefault("formato_ticket_tpv", False)
+        datos.setdefault("moneda", "EUR")
+        datos.setdefault("tipo_operacion", "interior")
         return datos
 
     except json.JSONDecodeError:

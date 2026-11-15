@@ -21,6 +21,12 @@ LETRAS_NIF = "TRWAGMYFPDXBNJZSQVHLCKE"
 LETRAS_CIF = "JABCDEFGHI"
 IVA_VALIDOS = {0.0, 4.0, 5.0, 10.0, 21.0}
 RECARGO_DE = {21.0: (5.2,), 10.0: (1.4,), 5.0: (0.62, 0.625), 4.0: (0.5,), 0.0: (0.0,)}  # el 5 % lleva 0,62 %, y muchas facturas imprimen 0,625
+# Operaciones que no son una compra o venta normal: hoy el Excel deja en blanco el tipo de operación, así que se revisan a mano.
+OPERACIONES_A_REVISAR = {
+    "intracomunitaria": "operación intracomunitaria (otro país de la UE)",
+    "importacion": "importación (proveedor de fuera de la UE)",
+    "isp": "inversión del sujeto pasivo",
+}
 MAX_ANTIGUEDAD = timedelta(days=366 * 5)
 MARGEN_FUTURO = timedelta(days=7)
 
@@ -90,6 +96,14 @@ def problemas_factura(factura, hoy=None):
             problemas.append(f"la fecha ({factura['fecha_factura']}) es de hace más de 5 años: posible error de lectura")
     except ValueError:
         problemas.append("fecha de la factura ilegible")
+
+    if not factura.get("_confirmada_por_persona"):   # una persona ya lo ha mirado: no se vuelve a bloquear por esto
+        moneda = (factura.get("moneda") or "EUR").strip().upper()
+        if moneda and moneda != "EUR":
+            problemas.append(f"la factura está en {moneda}: hay que convertirla a euros antes de anotarla")
+        operacion = (factura.get("tipo_operacion") or "interior").strip().lower()
+        if operacion in OPERACIONES_A_REVISAR:
+            problemas.append(f"{OPERACIONES_A_REVISAR[operacion]}: el Excel necesita indicar el tipo de operación, revísela")
 
     for d in factura.get("desgloses") or []:
         base, cuota, pct = _dinero(d.get("base")), _dinero(d.get("cuota_iva")), _dinero(d.get("pct_iva"))
