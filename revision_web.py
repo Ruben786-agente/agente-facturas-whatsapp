@@ -15,10 +15,10 @@ from almacenamiento_tenant import storage_para_tenant
 from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_carpeta_sin_identificar,
                          obtener_revision, resolver_sin_identificar, resolver_empresa_cliente_por_cif,
                          listar_proveedores_aprendidos, olvidar_proveedor_aprendido,
-                         obtener_sin_identificar, listar_empresas_activas, eliminar_tickets_de_empresa, olvidar_documentos_vistos, listar_sin_identificar_ilegibles)
+                         obtener_sin_identificar, obtener_informe_periodo, listar_empresas_activas, eliminar_tickets_de_empresa, olvidar_documentos_vistos, listar_sin_identificar_ilegibles)
 from estilo_web import pagina
 from panel_web import login_requerido
-from periodo_fiscal import nombres_excel_posibles, periodo_efectivo
+from periodo_fiscal import nombres_excel_posibles, periodo_efectivo, MESES
 from procesamiento import reprocesar_revision, asignar_sin_identificar, marcar_venta_propia
 from clasificador_documentos import nombre_archivo_destino
 
@@ -341,6 +341,68 @@ def abrir_excel():
                 return storage.obtener_enlace(archivo.id)
         return storage.obtener_enlace(carpeta)
     return _abrir(enlace)
+
+
+PLANTILLA_INFORME = pagina("Informe de comprobación", """
+<style>
+  .informe h1 { font-size: 34px; }
+  .cifras { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; margin: 22px 0; }
+  .cifra { background: var(--superficie); border: 1px solid var(--linea); border-radius: 10px; padding: 14px 16px; }
+  .cifra b { display: block; font-size: 26px; }
+  .cifra span { color: var(--tinta-2); font-size: 14px; }
+  .informe h2 { font-size: 21px; margin: 28px 0 8px; }
+  @media print { .barra, .no-imprimir { display: none !important; } }
+</style>
+<main class="pagina informe">
+  <p class="no-imprimir"><a href="{{ url_for('panel.panel') }}">&larr; Volver al panel</a></p>
+  <h1>Informe de comprobación</h1>
+  <p class="tenue">{{ i.empresa }} ({{ i.cif }}) &middot; {{ etiqueta }}. Resumen para comprobar rápido lo que ha hecho el agente.</p>
+  <div class="cifras">
+    <div class="cifra"><b>{{ i.ventas }}</b><span>ventas &middot; {{ i.ventas_total|eur }}</span></div>
+    <div class="cifra"><b>{{ i.compras }}</b><span>compras &middot; {{ i.compras_total|eur }}</span></div>
+    <div class="cifra"><b>{{ i.dudosas|length }}</b><span>en revisión (no están en el Excel)</span></div>
+    <div class="cifra"><b>{{ i.tickets }}</b><span>tickets &middot; {{ i.tickets_total|eur }}</span></div>
+    {% if i.revisadas %}<div class="cifra"><b>{{ i.revisadas }}</b><span>revisadas por usted</span></div>{% endif %}
+  </div>
+
+  <h2>Huecos en la numeración de ventas</h2>
+  {% if i.huecos %}<p class="alerta">Faltan estos números entre las ventas de este periodo: <strong>{{ i.huecos|join(", ") }}</strong>. Pueden ser facturas anuladas o archivos que no han llegado.</p>
+  {% else %}<p class="tenue">No se detectan huecos (se comprueba entre la primera y la última factura de cada serie).</p>{% endif %}
+
+  <h2>Posibles duplicadas</h2>
+  {% if i.duplicadas %}<p class="alerta">Hay más de una factura con el mismo número, proveedor e importe: <strong>{{ i.duplicadas|join(", ") }}</strong>.</p>
+  {% else %}<p class="tenue">Ninguna.</p>{% endif %}
+
+  <h2>Facturas dudosas</h2>
+  {% if i.dudosas %}
+  <div class="tabla"><table class="apilable">
+    <tr><th>Fecha</th><th>Nº factura</th><th>Proveedor</th><th class="num">Total</th><th>Motivo</th><th></th></tr>
+    {% for d in i.dudosas %}
+    <tr><td data-label="Fecha">{{ d.fecha }}</td><td data-label="Nº factura">{{ d.num }}</td><td data-label="Proveedor">{{ d.proveedor }}</td>
+      <td data-label="Total" class="num">{{ d.total|eur }}</td><td data-label="Motivo">{{ d.motivo }}</td>
+      <td class="no-imprimir"><a class="btn discreto" href="{{ url_for('revision.ver_revision', factura_id=d.id) }}" target="_blank" rel="noopener">Ver original</a>
+        {% if d.corregible %}<a class="btn" href="{{ url_for('revision.corregir', factura_id=d.id) }}">Corregir</a>{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  {% else %}<p class="tenue">No hay facturas pendientes de revisar en este periodo.</p>{% endif %}
+
+  <p class="no-imprimir" style="margin-top:26px;"><button class="btn" type="button" onclick="window.print()">Imprimir o guardar como PDF</button></p>
+  <p class="tenue" style="margin-top:14px;font-size:14px;">Este informe no sustituye a su revisión: indica dónde mirar primero. Los huecos y duplicadas son avisos, no errores seguros.</p>
+</main>
+""", activa="panel")
+
+
+@bp_revision.route("/informe")
+@login_requerido
+def informe_comprobacion():
+    """Informe de comprobación de un cliente y periodo; solo se genera cuando el usuario lo pide con el botón del panel."""
+    clave = request.args.get("clave", "")
+    i = obtener_informe_periodo(session["tenant_id"], request.args.get("cif", ""), clave)
+    if not i:
+        return redirect(url_for("panel.panel"))
+    anio, _, resto = clave.partition("-")
+    etiqueta = f"{resto[1:]}T {anio}" if resto.startswith("T") else f"{MESES[int(resto) - 1]} {anio}"
+    return render_template_string(PLANTILLA_INFORME, i=i, etiqueta=etiqueta)
 
 
 @bp_revision.route("/descargar/excel")
