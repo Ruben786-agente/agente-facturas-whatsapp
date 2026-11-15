@@ -222,6 +222,7 @@ PLANTILLA_PANEL = pagina("Panel", """
         window.addEventListener('load', function () { ir(); setTimeout(ir, 60); setTimeout(ir, 250); });
       })();
     </script>
+    {% if clientes and periodo_activo %}<p style="margin:0 0 12px;"><a class="btn discreto" href="{{ url_for('revision.descargar_excels', clave=periodo_activo) }}">Descargar todos los Excel de este periodo (ZIP)</a></p>{% endif %}
     {% if clientes %}
     <div class="tabla"><table class="apilable">
       <tr><th>Cliente</th>{% if periodicidad != "mensual" %}<th>Trimestre</th>{% endif %}<th class="num">Facturas</th><th class="num">Total</th><th class="num">Tickets</th><th class="num">En revisión</th><th>Estado</th><th>Excel</th></tr>
