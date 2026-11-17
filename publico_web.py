@@ -81,6 +81,9 @@ CSS_PUBLICO = """
   .rejilla > div { border-top: 2px solid var(--marca); padding-top: 14px; }
   .rejilla h3 { font-size: 18px; margin-bottom: 4px; }
   .rejilla p { color: var(--tinta-2); margin: 0; font-size: 15.5px; }
+  .progs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+  .prog { border: 1px solid var(--linea); border-radius: 999px; padding: 8px 16px; font-size: 15.5px; color: var(--tinta-2); }
+  .prog.ok { background: var(--marca-clara); border-color: var(--marca); color: var(--tinta); font-weight: 600; }
   .datos-caja { background: var(--marca-clara); border-radius: 12px; padding: 30px 32px; margin-top: 28px; }
   .datos-caja ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; color: var(--tinta); }
   .precio-caja { background: var(--superficie); border: 1px solid var(--linea); border-radius: 12px; padding: 32px; margin-top: 28px; max-width: 520px; }
@@ -184,6 +187,19 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
 </section>
 
 <section class="p-sec">
+  <h2>Programas contables</h2>
+  <p class="intro">Hoy el Excel sale en el formato de miEos, listo para importar. Estamos preparando los demás programas y priorizamos los que más nos pidan.</p>
+  <div class="progs">
+    <span class="prog ok">miEos &middot; disponible</span>
+    <span class="prog">Sage &middot; en preparaci&oacute;n</span>
+    <span class="prog">ContaSOL &middot; en preparaci&oacute;n</span>
+    <span class="prog">Glasof &middot; en preparaci&oacute;n</span>
+    <span class="prog">a3 &middot; en preparaci&oacute;n</span>
+  </div>
+  {% if d.email %}<p class="intro">&iquest;Usa otro programa? Cu&eacute;ntenoslo en <a href="mailto:{{ d.email }}?subject=Mi%20programa%20contable">{{ d.email }}</a> y lo tendremos en cuenta.</p>{% endif %}
+</section>
+
+<section class="p-sec">
   <h2>Sus datos, bajo su control</h2>
   <div class="datos-caja"><ul>
     <li>Sus archivos siguen en <strong>su propio OneDrive o Google Drive</strong>: usted decide qué carpetas existen y puede cerrar el acceso cuando quiera.</li>
@@ -215,6 +231,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
   <h2>Preguntas frecuentes</h2>
   <details><summary>¿Qué necesito para empezar?</summary><p>Una cuenta de correo (Gmail u Outlook / Microsoft 365) y un almacenamiento (OneDrive o Google Drive). Si su Microsoft 365 es de empresa, puede que un administrador tenga que aprobar el permiso una sola vez; le damos un enlace para enviárselo.</p></details>
   <details><summary>¿Y si la IA se equivoca?</summary><p>Lo que no está claro no se anota en el Excel: va a Revisión con el motivo, y usted lo corrige o lo da por revisado desde el panel. El agente es una ayuda y no sustituye su revisión profesional: usted siempre tiene la última palabra.</p></details>
+  <details><summary>¿Con qué programas contables funciona?</summary><p>Hoy genera el Excel en el formato de miEos. Estamos preparando Sage, ContaSOL, Glasof y a3; si usa otro programa, cuéntenoslo y lo valoramos. No anunciamos un programa como disponible hasta haberlo probado.</p></details>
   <details><summary>¿Qué documentos lee?</summary><p>Facturas y tickets que lleguen como adjunto al correo, en PDF o imagen. Si el destinatario no se reconoce o falta el CIF, el documento se aparta para que usted lo identifique.</p></details>
   <details><summary>¿Dónde se guardan mis archivos?</summary><p>En su OneDrive o Google Drive, no en nuestros servidores. Nosotros solo guardamos los datos necesarios para que el panel funcione: qué facturas se han leído y su estado.</p></details>
   <details><summary>¿Puedo cancelar cuando quiera?</summary><p>Sí. No hay permanencia. Y si lo desea, puede borrar su cuenta y todos sus datos desde el propio panel.</p></details>
