@@ -170,7 +170,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
   <div class="pasos-p">
     <div><h3>Conecte su correo y su almacenamiento</h3><p>Gmail u Outlook / Microsoft 365 para recibir, y OneDrive o Google Drive para archivar. Son dos clics y no instala nada.</p></div>
     <div><h3>Llegan por correo o las sube usted</h3><p>Sus clientes siguen enviando facturas y tickets, en PDF o en foto, a su correo habitual, sin cambiar nada. Y usted puede subir directamente PDF, fotos escaneadas o lotes en ZIP desde el panel.</p></div>
-    <div><h3>El agente lo deja hecho</h3><p>Lee cada documento, lo anota en el Excel del cliente y del periodo (mes o trimestre, como prefiera) y guarda el original en su carpeta.</p></div>
+    <div><h3>El agente lo deja hecho</h3><p>Lee cada documento, lo anota en el Excel del cliente y del periodo (mes o trimestre, como prefiera) y guarda el original en su carpeta. Usted solo revisa lo dudoso, y la última palabra es siempre suya.</p></div>
   </div>
 </section>
 
