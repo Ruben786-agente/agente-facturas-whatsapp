@@ -172,7 +172,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su
     <a class="btn sec" href="{{ url_for('panel.login') }}">Ya tengo cuenta</a>{% endif %}
   </div>
   <p class="nota-hero">Sin tarjeta para empezar. Cancele cuando quiera.</p>
-  <p class="nota-hero"><strong>Hoy:</strong> miEos, listo para importar. <strong>Sage, ContaSOL, a3 y Glasof:</strong> preparamos su formato al registrarse.</p>
+  <p class="nota-hero"><strong>Hoy:</strong> miEos, listo para importar. <strong>ContaSOL y Sage 50:</strong> disponibles en pruebas. <strong>a3, Glasof y otros:</strong> preparamos su formato al registrarse.</p>
 </div></section>
 
 <section class="p-sec">
@@ -197,12 +197,29 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su
 </section>
 
 <section class="p-sec">
+  <h2>Por qu&eacute; elegir este agente</h2>
+  <p class="intro">Pensado para despachos peque&ntilde;os, que no tienen tiempo de configurar ni de formar a nadie.</p>
+  <div class="rejilla">
+    <div><h3>Sin dar de alta proveedores</h3><p>El proveedor sale de la propia factura. No tiene que crearlo ni asignarle cuentas a mano antes de poder trabajar con ella.</p></div>
+    <div><h3>No instala nada</h3><p>Todo funciona desde su correo, su OneDrive o Google Drive y el navegador. Sin programas en el ordenador del despacho ni intervenci&oacute;n de un t&eacute;cnico.</p></div>
+    <div><h3>Sus archivos, en su nube</h3><p>Los originales y los Excel quedan en su OneDrive o Google Drive, no en un almac&eacute;n ajeno.</p></div>
+    <div><h3>Cuida los CIF</h3><p>Valida el d&iacute;gito de control, corrige con lo que ya conoce y le avisa de proveedores que parecen repetidos o de un CIF mal le&iacute;do.</p></div>
+    <div><h3>No adivina: lo dudoso, a revisi&oacute;n</h3><p>Lo que no est&aacute; claro va aparte, con el motivo, y lo corrige en un clic. Si quita algo de la lista, puede restaurarlo durante 30 d&iacute;as.</p></div>
+    <div><h3>Avisos a su medida</h3><p>Resumen diario por correo, solo si hay algo pendiente, y con interruptor para apagarlo. Si no hay nada, no le escribimos.</p></div>
+    <div><h3>Excel para su programa</h3><p>miEos de serie, y ContaSOL y Sage 50 en pruebas. Con otros programas, preparamos su formato a partir de un fichero de ejemplo.</p></div>
+    <div><h3>Cuatro entradas</h3><p>Correo (Gmail u Outlook), carpeta de OneDrive o Google Drive, y subida directa desde el panel.</p></div>
+    <div><h3>14 d&iacute;as gratis, sin tarjeta</h3><p>Pru&eacute;belo con sus propias facturas antes de decidir.</p></div>
+  </div>
+</section>
+
+<section class="p-sec">
   <h2>Programas contables</h2>
   <p class="intro">Hoy el Excel sale en el formato de miEos, listo para importar. &iquest;Usa otro programa? D&iacute;galo al registrarse y preparamos su formato: le pediremos un fichero de ejemplo con datos ficticios. Priorizamos los que m&aacute;s nos pidan.</p>
   <div class="progs">
     <span class="prog ok">miEos &middot; disponible</span>
-    <span class="prog">Sage &middot; en preparaci&oacute;n</span>
-    <span class="prog">ContaSOL &middot; en preparaci&oacute;n</span>
+    <span class="prog">Sage 50 &middot; en pruebas</span>
+    <span class="prog">ContaSOL &middot; en pruebas</span>
+    <span class="prog">Sage Despachos &middot; en preparaci&oacute;n</span>
     <span class="prog">Glasof &middot; en preparaci&oacute;n</span>
     <span class="prog">a3 &middot; en preparaci&oacute;n</span>
   </div>
