@@ -129,7 +129,7 @@ CSS_PUBLICO = """
 
 CABECERA = (
     '<header class="p-cab"><div class="p-cab-in">'
-    '<a class="marca" href="{{ url_for(\'publico.inicio\') }}">' + LOGO + 'Agente Facturas</a>'
+    '<a class="marca" href="{{ url_for(\'publico.inicio\') }}">' + LOGO + 'Agente Facturas <small style="font-weight:500;opacity:.7;font-size:.6em;margin-left:4px;">para gestorías</small></a>'
     '{% if logueada %}<a class="btn principal" href="{{ url_for(\'panel.panel\') }}">Ir al panel</a>'
     '{% else %}<a class="enlace" href="{{ url_for(\'panel.login\') }}">Entrar</a>'
     '<a class="btn principal" href="{{ url_for(\'alta.registro\') }}">Probar gratis</a>{% endif %}'
@@ -266,7 +266,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su
   <details><summary>¿Puedo cancelar cuando quiera?</summary><p>Sí. No hay permanencia. Y si lo desea, puede borrar su cuenta y todos sus datos desde el propio panel.</p></details>
 </section>
 """ + PIE, barra=False, extra_head=_meta(
-    "Agente Facturas: las facturas de sus clientes, directas al Excel de su programa contable",
+    "Agente Facturas para gestorías: las facturas de sus clientes, directas al Excel de su programa contable",
     "El agente lee las facturas del correo de su gestoría y las deja en Excel para su programa contable (miEos hoy; Sage, ContaSOL, a3 y Glasof a petición). 14 días gratis.",
     "/"))
 
