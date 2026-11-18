@@ -45,6 +45,8 @@ def _datos():
         "precio": f"{precio} al mes + IVA" if precio else "",
         "promo": (_con_euro(os.environ.get("PRECIO_PROMO", "")) + " al mes + IVA") if os.environ.get("PRECIO_PROMO", "").strip() else "",
         "promo_nota": os.environ.get("PROMO_NOTA", "").strip(),
+        # Los importes solo se enseñan si en Render se pone MOSTRAR_PRECIO=si; por defecto se invita a consultar los planes.
+        "mostrar_precio": os.environ.get("MOSTRAR_PRECIO", "").strip().lower() in ("si", "sí", "1", "true"),
         "url": os.environ.get("URL_PUBLICA", "https://agentefacturas.es").rstrip("/"),
         "anio": date.today().year, "version": VERSION_LEGAL,
     }
@@ -218,9 +220,11 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su
 </section>
 
 <section class="p-sec">
-  <h2>Un solo plan, todo incluido</h2>
+  <h2>{% if d.mostrar_precio %}Un solo plan, todo incluido{% else %}Planes y precios{% endif %}</h2>
   <div class="precio-caja">
-    {% if d.promo %}<div class="etiqueta-promo">Precio de lanzamiento</div>
+    {% if not d.mostrar_precio %}<div class="cifra-p" style="font-size:30px;">Consulte los planes</div>
+    <div class="precio-habitual">El precio depende del volumen de facturas de su gestoría. Se lo indicamos antes de contratar.{% if d.email %} Escríbanos a <a href="mailto:{{ d.email }}?subject=Planes%20y%20precios">{{ d.email }}</a>.{% endif %}</div>
+    {% elif d.promo %}<div class="etiqueta-promo">Precio de lanzamiento</div>
     <div class="cifra-p">{{ d.promo }}</div>
     {% if d.precio %}<div class="precio-habitual">Precio habitual: <s>{{ d.precio }}</s></div>{% endif %}
     {% if d.promo_nota %}<div class="precio-habitual">{{ d.promo_nota }}</div>{% endif %}
@@ -278,7 +282,7 @@ PLANTILLA_TERMINOS = _legal("Condiciones del servicio", """
 <ul>
   <li>El Servicio se contrata a través de la web. El Cliente declara ser una gestoría o profesional que actúa en el ámbito de su actividad.</li>
   <li>Se ofrece una prueba gratuita de 14 días, sin tarjeta. Al terminar, para seguir usándolo hay que suscribirse.</li>
-  <li>Precio: {% if d.promo %}{{ d.promo }} (precio de lanzamiento; precio habitual: {{ d.precio }}){% elif d.precio %}{{ d.precio }}{% else %}[PENDIENTE]{% endif %}. Se cobra por periodos mensuales mediante la pasarela de pago Stripe y se renueva automáticamente cada mes.</li>
+  <li>Precio: {% if not d.mostrar_precio %}el del plan que elija el Cliente, que se le comunica antes de contratar y se muestra en el momento del pago{% elif d.promo %}{{ d.promo }} (precio de lanzamiento; precio habitual: {{ d.precio }}){% elif d.precio %}{{ d.precio }}{% else %}[PENDIENTE]{% endif %}. Se cobra por periodos mensuales mediante la pasarela de pago Stripe y se renueva automáticamente cada mes.</li>
   <li>El Cliente puede cancelar en cualquier momento; la cancelación surte efecto al final del periodo ya pagado. No hay permanencia y no se reembolsan periodos ya iniciados, salvo error imputable al Prestador.</li>
 </ul>
 
