@@ -201,6 +201,17 @@ class Aviso(Base):
     creado_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class Actividad(Base):
+    """Registro de lo que hace la gestoría en la web (solo acciones humanas), para poder repasarlo."""
+    __tablename__ = "actividad"
+    id = _uuid_column()
+    tenant_id = Column(String(36), nullable=False, index=True)
+    actor = Column(String, nullable=False, default="")
+    accion = Column(String, nullable=False)
+    detalle = Column(String, nullable=False, default="")
+    creada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
 TENANT_GLOBAL = "global"  # para marcas que no son de ninguna gestoría en concreto
 
 
@@ -1614,6 +1625,34 @@ def marcar_revisada(tenant_id, factura_id, descartada=False):
 
 
 PLAZO_RESTAURAR_DIAS = 30
+ACTIVIDAD_DIAS = 90
+
+
+def registrar_actividad(tenant_id, accion, detalle="", actor=""):
+    """Anota una acción de la gestoría. Nunca debe romper lo que se estaba haciendo."""
+    try:
+        session = _obtener_session()
+        try:
+            session.add(Actividad(tenant_id=tenant_id, actor=(actor or "")[:120], accion=accion[:80], detalle=(detalle or "")[:300]))
+            session.commit()
+        finally:
+            session.close()
+    except Exception:
+        log.exception("No se pudo registrar la actividad %s", accion)
+
+
+def obtener_actividad(tenant_id, limite=200):
+    """Últimas acciones (más reciente primero); de paso borra las de más de 90 días."""
+    session = _obtener_session()
+    try:
+        corte = datetime.now(timezone.utc) - timedelta(days=ACTIVIDAD_DIAS)
+        session.query(Actividad).filter(Actividad.tenant_id == tenant_id, Actividad.creada_en < corte).delete()
+        session.commit()
+        filas = (session.query(Actividad).filter(Actividad.tenant_id == tenant_id)
+                 .order_by(Actividad.creada_en.desc()).limit(limite).all())
+        return [{"cuando": _como_aware_utc(a.creada_en), "actor": a.actor, "accion": a.accion, "detalle": a.detalle} for a in filas]
+    finally:
+        session.close()
 
 
 def obtener_descartadas(tenant_id, dias=PLAZO_RESTAURAR_DIAS):

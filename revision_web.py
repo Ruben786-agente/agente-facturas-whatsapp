@@ -17,6 +17,7 @@ from basededatos import (obtener_estado_conexiones, marcar_revisada, obtener_car
                          listar_proveedores_aprendidos, olvidar_proveedor_aprendido,
                          obtener_sin_identificar, obtener_informe_periodo, listar_empresas_activas, eliminar_tickets_de_empresa, olvidar_documentos_vistos, listar_sin_identificar_ilegibles)
 from estilo_web import pagina
+from basededatos import registrar_actividad
 from panel_web import login_requerido
 from periodo_fiscal import nombres_excel_posibles, periodo_efectivo, MESES
 from procesamiento import reprocesar_revision, asignar_sin_identificar, marcar_venta_propia
@@ -51,6 +52,7 @@ def _numero(texto):
 def restaurar(factura_id):
     from basededatos import restaurar_descartada
     if restaurar_descartada(session["tenant_id"], factura_id):
+        registrar_actividad(session["tenant_id"], "Factura restaurada", f"Factura {factura_id[:8]} devuelta a pendientes")
         flash("Restaurada: vuelve a estar en la lista de pendientes.")
     else:
         flash("No se ha podido restaurar (han pasado más de 30 días o ya no está).")
@@ -61,6 +63,7 @@ def restaurar(factura_id):
 @login_requerido
 def revisada(factura_id):
     if marcar_revisada(session["tenant_id"], factura_id, descartada=True):
+        registrar_actividad(session["tenant_id"], "Factura quitada de la lista", f"Factura {factura_id[:8]} (se puede restaurar 30 días)")
         flash("Quitada de la lista. Si se arrepiente, puede restaurarla durante 30 días desde «Quitadas de la lista» en el panel.")
     return redirect(url_for("panel.panel"))
 
@@ -69,6 +72,7 @@ def revisada(factura_id):
 @login_requerido
 def sin_identificar_revisado(documento_id):
     if resolver_sin_identificar(session["tenant_id"], documento_id):
+        registrar_actividad(session["tenant_id"], "Documento sin identificar quitado", f"Documento {documento_id[:8]}")
         flash("Documento quitado de la lista de sin identificar.")
     return redirect(url_for("panel.panel"))
 
@@ -205,6 +209,8 @@ def aceptar(factura_id):
         log.exception("Fallo aceptando la factura %s", factura_id)
         flash("Ha habido un problema al guardar. Inténtelo de nuevo.")
         return redirect(url_for("panel.panel"))
+    if res["accion"] in ("procesada", "duplicado_exacto"):
+        registrar_actividad(tenant_id, "Factura aceptada tal cual", f"{(r['datos']['factura'].get('num_factura') or '')} · {r['empresa']['nombre']}")
     if res["accion"] == "procesada":
         flash(f"Añadida al Excel de {r['empresa']['nombre']}.")
     elif res["accion"] == "duplicado_exacto":
@@ -229,6 +235,7 @@ def venta_propia(factura_id):
         log.exception("Fallo en venta propia %s", factura_id)
         flash("Ha habido un problema al guardar. Inténtelo de nuevo.")
         return redirect(url_for("panel.panel"))
+    registrar_actividad(tenant_id, "Marcadas como venta del cliente", f"{res['hechas']} añadida(s)")
     partes = []
     if res["hechas"]:
         partes.append(f"{res['hechas']} factura(s) añadida(s) como venta del cliente")
@@ -315,6 +322,7 @@ def asignar(documento_id):
                 destino = {"procesada": "Anotada en el Excel.", "duplicado_exacto": "Ya estaba anotada, no se ha duplicado.",
                            "ticket": "Guardada como ticket.", "revision": "Ha quedado en la Revisión de ese cliente para que la corrija (" + str(res.get("motivo") or "") + ")."
                            }.get(res["accion"], "Hecho.")
+                registrar_actividad(tenant_id, "Documento asignado a un cliente", f"{res['empresa']}: {res['accion']}")
                 flash(f"Asignada a {res['empresa']}. {destino}")
                 return redirect(url_for("panel.panel"))
         except Exception:
@@ -802,6 +810,7 @@ def corregir(factura_id):
 
     if request.method == "POST" and request.form.get("accion") == "gestionada":
         if marcar_revisada(tenant_id, factura_id):
+            registrar_actividad(tenant_id, "Factura marcada como gestionada", f"Factura {factura_id[:8]}")
             return _confirmacion(tenant_id, "Marcada como gestionada",
                                  "Ya no aparece en la lista de Revisión. No se ha añadido nada al Excel.", factura_id)
         flash("Esta factura ya no estaba pendiente.")
@@ -816,6 +825,8 @@ def corregir(factura_id):
                 raise RuntimeError("No hay almacenamiento conectado")
             res = reprocesar_revision(storage, tenant_id, factura_id, nueva)
             resumen = f"Factura {nueva.get('num_factura') or ''} de {(nueva.get('emisor') or {}).get('nombre') or 'su proveedor'}, total {nueva.get('total_factura')} €."
+            if res["accion"] in ("procesada", "duplicado_exacto"):
+                registrar_actividad(tenant_id, "Factura corregida y añadida", resumen)
             if res["accion"] == "procesada":
                 return _confirmacion(tenant_id, "Factura añadida al Excel",
                                      f"{resumen} Se ha anotado en el Excel de {r['empresa']['nombre']}"
