@@ -18,7 +18,7 @@ from flask import Blueprint, redirect, render_template_string, request, session,
 import autenticacion_google as google
 import autenticacion_onedrive as microsoft
 from almacenamiento import obtener_almacenamiento
-from basededatos import (PROGRAMAS, PROGRAMA_LISTO, crear_gestoria_prueba, guardar_programa, obtener_programa, establecer_password, existe_email_gestoria,
+from basededatos import (PROGRAMAS, PROGRAMA_LISTO, PROGRAMAS_LISTOS, crear_gestoria_prueba, guardar_programa, obtener_programa, establecer_password, existe_email_gestoria,
                          guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial,
                          eliminar_gestoria, email_de_gestoria, obtener_suscripcion_stripe, verificar_login,
                          obtener_periodicidad, guardar_periodicidad)
@@ -41,10 +41,10 @@ PLANTILLA_REGISTRO = acceso("Crear cuenta", """
     <label for="email">Email</label>
     <input id="email" type="email" name="email" autocomplete="email" required>
     <label for="programa">Programa contable que usa</label>
-    <select id="programa" name="programa" onchange="document.getElementById('aviso-programa').style.display = this.value === 'mieos' ? 'none' : 'block';">
+    <select id="programa" name="programa" onchange="document.getElementById('aviso-programa').style.display = (['mieos','contasol','sage50'].indexOf(this.value) >= 0) ? 'none' : 'block';">
       {% for clave, etiqueta in programas %}<option value="{{ clave }}" {% if clave == programa_elegido %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}
     </select>
-    <p id="aviso-programa" class="tenue" style="display:{{ 'none' if programa_elegido == 'mieos' else 'block' }};font-size:14px;margin:8px 0 0;">Hoy el Excel sale en formato miEOS. Para su programa preparamos el formato: podrá usar el agente desde ya, y le pediremos un fichero de ejemplo <strong>con datos ficticios</strong> para tenerlo listo.</p>
+    <p id="aviso-programa" class="tenue" style="display:{{ 'none' if programa_elegido in ('mieos','contasol','sage50') else 'block' }};font-size:14px;margin:8px 0 0;">Hoy el Excel sale en formato miEOS. Para su programa preparamos el formato: podrá usar el agente desde ya, y le pediremos un fichero de ejemplo <strong>con datos ficticios</strong> para tenerlo listo.</p>
     <label for="password">Contraseña</label>
     <input id="password" type="password" name="password" autocomplete="new-password" required minlength="8">
     <ul id="reglas" style="list-style:none;margin:10px 0 0;padding:0;font-size:14px;line-height:1.7;color:var(--tinta-3);">
@@ -197,6 +197,8 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
       </form>
       {% if programa == "mieos" %}
         <p class="que" style="margin-top:8px;">El Excel sale en el formato de miEOS, listo para importar.</p>
+      {% elif programa in ("contasol", "sage50") %}
+        <p class="que" style="margin-top:8px;">Al pulsar «Descargar Excel» recibirá un ZIP con los ficheros de importación de su programa (y un LEEME con los pasos). Es un formato nuevo: <strong>pruebe primero con un solo cliente</strong> y revise lo importado antes de seguir. Si algo no cuadra, avísenos.</p>
       {% else %}
         <p class="que" style="margin-top:8px;">Hoy el Excel sale en formato miEOS. Estamos preparando el formato de su programa. Para ello nos ayudaría un fichero de ejemplo de importación de su programa, <strong>con datos ficticios</strong> (no mande datos reales de sus clientes).
         {% if contacto %}Puede enviarlo a <a href="mailto:{{ contacto }}?subject=Fichero%20de%20ejemplo">{{ contacto }}</a>.{% endif %}</p>

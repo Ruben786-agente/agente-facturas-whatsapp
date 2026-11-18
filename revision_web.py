@@ -450,6 +450,9 @@ def descargar_excels():
     if not storage:
         flash("No hay almacenamiento conectado. Conéctelo en Conexiones.")
         return redirect(url_for("panel.panel"))
+    from basededatos import obtener_programa
+    from exportadores import convertir
+    programa_t = obtener_programa(tenant_id)
     inicio, buffer, faltan = time.time(), BytesIO(), []
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as z:
         for c in clientes:
@@ -468,7 +471,19 @@ def descargar_excels():
                         break
                 if not archivo:
                     raise RuntimeError("el Excel ya no está en la carpeta")
-                z.writestr(nombre, storage.descargar_archivo(archivo.id))
+                contenido_c = storage.descargar_archivo(archivo.id)
+                convertido = None
+                try:
+                    convertido = convertir(programa_t, contenido_c)
+                except Exception:
+                    log.exception("No se pudo convertir el Excel de un cliente al formato del programa")
+                if convertido:
+                    carpeta = nombre.rsplit(".", 1)[0] + "/"
+                    for n_c, b_c in convertido[0]:
+                        z.writestr(carpeta + n_c, b_c)
+                    z.writestr(carpeta + "LEEME.txt", convertido[1])
+                else:
+                    z.writestr(nombre, contenido_c)
             except Exception as e:
                 log.warning("No se pudo añadir el Excel de un cliente al ZIP: %s", e)
                 faltan.append(f"{c['empresa']} ({c['cif']}): no se ha podido descargar")
@@ -504,6 +519,16 @@ def descargar_excel():
         log.exception("No se pudo descargar el Excel")
         flash("No se ha podido descargar el Excel. Compruebe que el almacenamiento sigue conectado en Conexiones.")
         return redirect(url_for("panel.panel"))
+    paquete = None
+    try:
+        from basededatos import obtener_programa
+        from exportadores import paquete_zip
+        paquete = paquete_zip(obtener_programa(session["tenant_id"]), contenido, nombre)
+    except Exception:
+        log.exception("No se pudo convertir el Excel al formato del programa contable; se entrega el de miEOS")
+    if paquete:
+        return send_file(BytesIO(paquete), as_attachment=True, download_name=nombre.rsplit(".", 1)[0] + " - importacion.zip",
+                         mimetype="application/zip")
     return send_file(BytesIO(contenido), as_attachment=True, download_name=nombre,
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
