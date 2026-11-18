@@ -25,9 +25,11 @@ def _uuid_column(**kwargs):
 
 
 # Programas contables que ofrece el selector del registro. Hoy solo miEOS tiene formato probado.
-PROGRAMAS = [("mieos", "miEOS"), ("sage", "Sage"), ("contasol", "ContaSOL"), ("a3", "A3"),
+PROGRAMAS = [("mieos", "miEOS"), ("sage", "Sage Despachos / otro Sage"), ("sage50", "Sage 50"), ("contasol", "ContaSOL"), ("a3", "A3"),
              ("glasof", "Glasof"), ("holded", "Holded"), ("otro", "Otro")]
 PROGRAMA_LISTO = "mieos"
+# Programas con exportador (miEOS de serie; ContaSOL y Sage 50 se generan a partir del Excel de miEOS, ver exportadores.py)
+PROGRAMAS_LISTOS = ("mieos", "contasol", "sage50")
 
 
 class Gestoria(Base):
@@ -1385,7 +1387,7 @@ def obtener_programas_gestorias():
         for g in session.query(Gestoria).filter_by(activa=True).order_by(Gestoria.creada_en.desc()).all():
             clave = getattr(g, "programa_contable", None) or PROGRAMA_LISTO
             filas.append({"nombre": g.nombre, "email": g.email_contacto, "programa": dict(PROGRAMAS).get(clave, clave),
-                          "pendiente": clave != PROGRAMA_LISTO,
+                          "pendiente": clave not in PROGRAMAS_LISTOS,
                           "creada": g.creada_en.strftime("%d/%m/%Y") if g.creada_en else ""})
         filas.sort(key=lambda f: not f["pendiente"])
         return filas

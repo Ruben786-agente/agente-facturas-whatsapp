@@ -12,3 +12,4 @@ openpyxl
 pypdf
 pillow
 pillow-heif
+xlwt
