@@ -14,6 +14,7 @@ from flask import Flask, request
 from basededatos import activar_suscripcion, desactivar_suscripcion, resolver_tenant_por_stripe_customer_id
 from webhook_whatsapp import bp_whatsapp
 from panel_web import bp_panel
+from actividad_web import bp_actividad
 from alta_web import bp_alta
 from tareas_web import bp_tareas
 from revision_web import bp_revision
@@ -40,6 +41,7 @@ app.register_blueprint(bp_publico)
 app.register_blueprint(bp_subida)
 app.register_blueprint(bp_archivos)
 app.register_blueprint(bp_clientes)
+app.register_blueprint(bp_actividad)
 
 
 @app.errorhandler(GestoriaNoExiste)

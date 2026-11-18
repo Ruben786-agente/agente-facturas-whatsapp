@@ -13,6 +13,7 @@ import re
 import secrets
 from datetime import datetime, timezone
 
+from basededatos import registrar_actividad
 from flask import Blueprint, jsonify, render_template_string, request, session
 
 from autenticacion_google import ErrorAutorizacionGoogle
@@ -271,6 +272,7 @@ def subir_archivo():
         guardado = _nombre_seguro(archivo.filename)
         storage.subir_archivo(carpetas["entrada"], guardado, contenido)
         crear_subida(tenant_id, os.path.basename(archivo.filename), guardado)
+        registrar_actividad(tenant_id, "Archivo subido", os.path.basename(archivo.filename))
     except (ErrorAutorizacionGoogle, ErrorAutorizacionMicrosoft):
         return jsonify(ok=False, mensaje="Vuelva a conectar su almacenamiento en Conexiones"), 409
     except Exception:
