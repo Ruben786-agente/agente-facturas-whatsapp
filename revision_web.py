@@ -46,11 +46,22 @@ def _numero(texto):
 # Marcar como revisado / abrir
 # ---------------------------------------------------------------------------
 
+@bp_revision.route("/revision/<factura_id>/restaurar", methods=["POST"])
+@login_requerido
+def restaurar(factura_id):
+    from basededatos import restaurar_descartada
+    if restaurar_descartada(session["tenant_id"], factura_id):
+        flash("Restaurada: vuelve a estar en la lista de pendientes.")
+    else:
+        flash("No se ha podido restaurar (han pasado más de 30 días o ya no está).")
+    return redirect(url_for("panel.panel"))
+
+
 @bp_revision.route("/revision/<factura_id>/revisada", methods=["POST"])
 @login_requerido
 def revisada(factura_id):
-    if marcar_revisada(session["tenant_id"], factura_id):
-        flash("Marcada como revisada. Ya no aparece en la lista.")
+    if marcar_revisada(session["tenant_id"], factura_id, descartada=True):
+        flash("Quitada de la lista. Si se arrepiente, puede restaurarla durante 30 días desde «Quitadas de la lista» en el panel.")
     return redirect(url_for("panel.panel"))
 
 

@@ -106,6 +106,49 @@ def notificar_correo_desconectado(tenant_id, motivo):
                               "y pulse «Volver a autorizar»; los correos recibidos mientras tanto se leerán al reconectar."])
 
 
+def enviar_resumen_diario(ahora=None):
+    """
+    Una vez al día (a partir de las 8:00, hora de Madrid): a cada gestoría con algo pendiente (revisiones o documentos sin identificar)
+    se le manda un correo con el recuento. Si no hay nada pendiente no se manda nada, y se puede apagar en Conexiones.
+    """
+    from zoneinfo import ZoneInfo
+    from basededatos import (notificacion_reciente, obtener_motivos_pendientes_de, obtener_resumen_diario, obtener_resumen_panel,
+                             registrar_notificacion, tenants_con_correo, TENANT_GLOBAL)
+    if not _activadas():
+        return 0
+    ahora = ahora or datetime.now(ZoneInfo("Europe/Madrid"))
+    if ahora.hour < 8:
+        return 0
+    marca = f"resumen-diario-{ahora.date().isoformat()}"
+    if notificacion_reciente(TENANT_GLOBAL, marca, 24):
+        return 0
+    registrar_notificacion(TENANT_GLOBAL, marca)
+    enviados = 0
+    for tenant_id in tenants_con_correo():
+        try:
+            if not obtener_resumen_diario(tenant_id):
+                continue
+            datos = obtener_resumen_panel(tenant_id)
+            r, si = datos["resumen"]["REVISION"], datos["resumen"]["SIN_IDENTIFICAR"]
+            if not (r or si):
+                continue
+            lineas = []
+            if r:
+                lineas.append(f"{r} {'factura' if r == 1 else 'facturas'} en revisión.")
+            if si:
+                lineas.append(f"{si} {'documento' if si == 1 else 'documentos'} sin identificar.")
+            motivos = obtener_motivos_pendientes_de(tenant_id)[:3]
+            if motivos:
+                lineas.append("Motivos más frecuentes: " + "; ".join(f"{m} ({n})" for m, n in motivos) + ".")
+            lineas.append("Puede resolverlas en el panel. Si prefiere no recibir este resumen, apáguelo en «Conexiones y suscripción».")
+            if notificar(tenant_id, f"resumen-{ahora.date().isoformat()}", "Resumen del día: tiene documentos por revisar",
+                         "Resumen del día", lineas, cada_horas=20):
+                enviados += 1
+        except Exception:
+            log.exception("No se pudo mandar el resumen diario a la gestoría %s", tenant_id)
+    return enviados
+
+
 def _hito(dias):
     """7, 3 o 1 según lo cerca que esté el plazo (None si falta más de una semana)."""
     return 1 if dias <= 1 else 3 if dias <= 3 else 7 if dias <= 7 else None

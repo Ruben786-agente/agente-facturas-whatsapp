@@ -46,6 +46,7 @@ class Gestoria(Base):
     periodicidad = Column(String, nullable=False, default="mensual", server_default="mensual")  # del Excel: mensual | trimestral
     alta_automatica = Column(Boolean, nullable=False, default=True, server_default="1")  # dar de alta clientes nuevos con la primera factura
     programa_contable = Column(String, nullable=False, default="mieos", server_default="mieos")  # programa que usa la gestoría (ver PROGRAMAS)
+    resumen_diario = Column(Boolean, nullable=False, default=True, server_default="1")  # correo diario con lo pendiente (se puede apagar)
     activa = Column(Boolean, nullable=False, default=True)
     creada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -110,6 +111,7 @@ class FacturaCache(Base):
     destino = Column(String, nullable=False)
     motivo = Column(String)  # por qué está en Revisión, si aplica
     datos_json = Column(Text)  # lectura de la IA de una factura en Revisión (para poder corregirla desde el panel)
+    descartada_en = Column(DateTime(timezone=True))  # cuándo la quitó la gestoría de la lista sin añadirla (se puede restaurar 30 días)
     procesada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -301,6 +303,20 @@ def _anadir_columnas_nuevas(motor):
                 conexion.execute(text("ALTER TABLE gestorias ADD COLUMN programa_contable VARCHAR NOT NULL DEFAULT 'mieos'"))
     except Exception:
         log.exception("No se pudo añadir la columna programa_contable a las gestorías")
+    try:
+        columnas = {c["name"] for c in inspect(motor).get_columns("gestorias")}
+        if "resumen_diario" not in columnas:
+            with motor.begin() as conexion:
+                conexion.execute(text("ALTER TABLE gestorias ADD COLUMN resumen_diario BOOLEAN NOT NULL DEFAULT TRUE"))
+    except Exception:
+        log.exception("No se pudo añadir la columna resumen_diario a las gestorías")
+    try:
+        columnas = {c["name"] for c in inspect(motor).get_columns("facturas_cache")}
+        if "descartada_en" not in columnas:
+            with motor.begin() as conexion:
+                conexion.execute(text("ALTER TABLE facturas_cache ADD COLUMN descartada_en TIMESTAMP"))
+    except Exception:
+        log.exception("No se pudo añadir la columna descartada_en a las facturas")
     try:
         columnas = {c["name"] for c in inspect(motor).get_columns("empresas_cliente")}
         if "periodicidad" not in columnas:
@@ -1580,14 +1596,75 @@ def obtener_revision(tenant_id, factura_id):
         session.close()
 
 
-def marcar_revisada(tenant_id, factura_id):
-    """La gestoría ya ha gestionado esta factura por su cuenta: sale de la lista de pendientes."""
+def marcar_revisada(tenant_id, factura_id, descartada=False):
+    """La gestoría ya ha gestionado esta factura por su cuenta: sale de la lista de pendientes.
+    descartada=True cuando la quita SIN añadirla al Excel: se anota la fecha para poder restaurarla 30 días."""
     session = _obtener_session()
     try:
         f = session.query(FacturaCache).filter_by(id=factura_id, tenant_id=tenant_id, destino="REVISION").first()
         if not f:
             return False
         f.destino = "REVISADA"
+        if descartada:
+            f.descartada_en = datetime.now(timezone.utc)
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+PLAZO_RESTAURAR_DIAS = 30
+
+
+def obtener_descartadas(tenant_id, dias=PLAZO_RESTAURAR_DIAS):
+    """Facturas que la gestoría quitó de la lista sin añadirlas, de los últimos días (se pueden restaurar)."""
+    desde = datetime.now(timezone.utc) - timedelta(days=dias)
+    session = _obtener_session()
+    try:
+        filas = (session.query(FacturaCache, EmpresaCliente.nombre)
+                 .join(EmpresaCliente, EmpresaCliente.id == FacturaCache.empresa_cliente_id)
+                 .filter(FacturaCache.tenant_id == tenant_id, FacturaCache.destino == "REVISADA",
+                         FacturaCache.descartada_en.isnot(None), FacturaCache.descartada_en >= desde)
+                 .order_by(FacturaCache.descartada_en.desc()).all())
+        return [{"id": f.id, "num_factura": f.num_factura, "proveedor": f.proveedor_nombre or f.proveedor_cif or "",
+                 "total": float(f.total_factura or 0), "empresa": nombre,
+                 "descartada": _como_aware_utc(f.descartada_en).strftime("%d/%m/%Y")} for f, nombre in filas]
+    finally:
+        session.close()
+
+
+def restaurar_descartada(tenant_id, factura_id):
+    """Devuelve a la lista de pendientes una factura que se quitó sin añadir. Solo las quitadas hace menos de 30 días."""
+    desde = datetime.now(timezone.utc) - timedelta(days=PLAZO_RESTAURAR_DIAS)
+    session = _obtener_session()
+    try:
+        f = session.query(FacturaCache).filter_by(id=factura_id, tenant_id=tenant_id, destino="REVISADA").first()
+        if not f or not f.descartada_en or _como_aware_utc(f.descartada_en) < desde:
+            return False
+        f.destino = "REVISION"
+        f.descartada_en = None
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def obtener_resumen_diario(tenant_id):
+    session = _obtener_session()
+    try:
+        g = session.get(Gestoria, tenant_id)
+        return bool(g.resumen_diario) if g and g.resumen_diario is not None else True
+    finally:
+        session.close()
+
+
+def guardar_resumen_diario(tenant_id, activo):
+    session = _obtener_session()
+    try:
+        g = session.get(Gestoria, tenant_id)
+        if not g:
+            return False
+        g.resumen_diario = bool(activo)
         session.commit()
         return True
     finally:
@@ -1852,7 +1929,7 @@ def olvidar_proveedor_aprendido(tenant_id, aprendido_id):
         session.close()
 
 
-TIPOS_AVISO_INFORMATIVO = ("empresa_nueva", "cif_aprendido", "emisor_detectado")  # no son un problema: solo informan de algo que ha hecho el agente
+TIPOS_AVISO_INFORMATIVO = ("empresa_nueva", "cif_aprendido", "emisor_detectado", "proveedor_duplicado")  # no son un problema: solo informan de algo que ha hecho el agente
 
 
 def marcar_avisos_vistos(tenant_id, grupo=None):
@@ -1965,6 +2042,22 @@ def proveedores_conocidos(tenant_id):
                  .filter(FacturaCache.tenant_id == tenant_id, FacturaCache.destino == "PROCESADA",
                          FacturaCache.proveedor_cif.isnot(None)).distinct().all())
         return [{"cif_nif": c, "nombre": n or ""} for c, n in filas if c]
+    finally:
+        session.close()
+
+
+def obtener_motivos_pendientes_de(tenant_id):
+    """Lo mismo que obtener_motivos_pendientes, pero de una sola gestoría (para su resumen diario)."""
+    import re
+    session = _obtener_session()
+    try:
+        motivos = [m for (m,) in session.query(FacturaCache.motivo).filter(FacturaCache.tenant_id == tenant_id, FacturaCache.destino == "REVISION").all()]
+        motivos += [m for (m,) in session.query(DocumentoSinIdentificar.motivo).filter(DocumentoSinIdentificar.tenant_id == tenant_id).all()]
+        cuenta = {}
+        for m in motivos:
+            clave = re.sub(r"\s*\([^)]*\)", "", m or "(sin motivo)").strip()
+            cuenta[clave] = cuenta.get(clave, 0) + 1
+        return sorted(cuenta.items(), key=lambda x: x[1], reverse=True)
     finally:
         session.close()
 
