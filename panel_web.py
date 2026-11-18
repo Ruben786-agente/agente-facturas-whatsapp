@@ -11,7 +11,7 @@ from functools import wraps
 from flask import Blueprint, request, redirect, session, render_template_string, url_for, get_flashed_messages
 
 from basededatos import (login_bloqueado, registrar_fallo_login, limpiar_fallos_login,
-                         verificar_login, obtener_resumen_panel, obtener_estado_conexiones, obtener_avisos, marcar_avisos_vistos, TIPOS_AVISO_INFORMATIVO)
+                         verificar_login, obtener_descartadas, obtener_resumen_panel, obtener_estado_conexiones, obtener_avisos, marcar_avisos_vistos, TIPOS_AVISO_INFORMATIVO)
 from estilo_web import acceso, eur, pagina
 
 bp_panel = Blueprint("panel", __name__)
@@ -197,6 +197,16 @@ PLANTILLA_PANEL = pagina("Panel", """
     {% else %}
     <div class="vacio"><strong>No hay nada pendiente.</strong>Si una factura necesita su revisión, aparecerá aquí.</div>
     {% endif %}
+    {% if descartadas %}
+    <details style="margin-top:18px;"><summary class="tenue" style="cursor:pointer;">Quitadas de la lista ({{ descartadas|length }}) · se pueden restaurar durante 30 días</summary>
+      <div class="tabla-envoltorio"><table>
+        <tr><th>Cliente</th><th>Factura</th><th>Proveedor</th><th>Total</th><th>Quitada el</th><th></th></tr>
+        {% for d in descartadas %}<tr><td data-label="Cliente">{{ d.empresa }}</td><td data-label="Factura">{{ d.num_factura }}</td><td data-label="Proveedor">{{ d.proveedor }}</td>
+          <td data-label="Total">{{ "%.2f"|format(d.total) }} €</td><td data-label="Quitada el">{{ d.descartada }}</td>
+          <td><form method="post" action="{{ url_for('revision.restaurar', factura_id=d.id) }}"><button class="btn discreto" type="submit">Restaurar</button></form></td></tr>{% endfor %}
+      </table></div>
+    </details>
+    {% endif %}
   </section>
 
   <section class="seccion">
@@ -296,7 +306,7 @@ def panel():
         PLANTILLA_PANEL, resumen=datos["resumen"], atencion=datos["atencion"], clientes=datos["clientes"],
         periodos=datos["periodos"], periodo_activo=datos["periodo_activo"], periodicidad=datos["periodicidad"],
         plazo=datos["plazo"], cierre=datos["cierre"], ahorro=datos["ahorro"], filtro=filtro, aviso=aviso,
-        mensajes=get_flashed_messages(), gestoria_nombre=e["nombre"],
+        mensajes=get_flashed_messages(), gestoria_nombre=e["nombre"], descartadas=obtener_descartadas(session["tenant_id"]),
         avisos=[a for a in todos_avisos if a["tipo"] not in TIPOS_AVISO_INFORMATIVO],
         avisos_info=[a for a in todos_avisos if a["tipo"] in TIPOS_AVISO_INFORMATIVO])
 

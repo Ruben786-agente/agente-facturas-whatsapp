@@ -21,7 +21,7 @@ from almacenamiento import obtener_almacenamiento
 from basededatos import (PROGRAMAS, PROGRAMA_LISTO, PROGRAMAS_LISTOS, crear_gestoria_prueba, guardar_programa, obtener_programa, establecer_password, existe_email_gestoria,
                          guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial,
                          eliminar_gestoria, email_de_gestoria, obtener_suscripcion_stripe, verificar_login,
-                         obtener_periodicidad, guardar_periodicidad)
+                         obtener_periodicidad, guardar_periodicidad, obtener_resumen_diario, guardar_resumen_diario)
 from onboarding import preparar_gestoria, reconstruir_carpetas_empresas
 from estilo_web import acceso, pagina
 from panel_web import login_requerido
@@ -172,6 +172,19 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
 
     <section class="paso opcional">
       <span class="n">+</span>
+      <h3>Resumen diario por correo</h3>
+      <form method="post" action="{{ url_for('alta.cambiar_resumen') }}" class="estado-linea">
+        <select name="resumen" aria-label="Resumen diario" style="max-width:260px;">
+          <option value="1" {% if resumen_diario %}selected{% endif %}>Activado</option>
+          <option value="0" {% if not resumen_diario %}selected{% endif %}>Apagado</option>
+        </select>
+        <button class="btn" type="submit">Guardar</button>
+      </form>
+      <p class="que" style="margin-top:8px;">Un correo al día, solo si hay facturas por revisar o documentos sin identificar, con el recuento y los motivos más frecuentes. Si no hay nada pendiente, no se envía. Puede apagarlo cuando quiera.</p>
+    </section>
+
+    <section class="paso opcional">
+      <span class="n">+</span>
       <h3>Excel de sus clientes</h3>
       <p class="que">¿Cada cuánto saca usted el Excel? El agente crea un archivo por cliente y periodo. Puede cambiarlo cliente a cliente en la pantalla <a href="{{ url_for('clientes.lista') }}">Clientes</a>. Si lo retira de la carpeta para importarlo, las facturas siguientes irán a uno nuevo, y las que ya había leído no se repiten.</p>
       <form method="post" action="{{ url_for('alta.cambiar_periodicidad') }}" class="estado-linea">
@@ -278,6 +291,7 @@ def conexiones():
                                   entrada_activa=estado["almacenamiento"] == "onedrive",
                                   periodicidad=obtener_periodicidad(session["tenant_id"]),
                                   programas=PROGRAMAS, programa=obtener_programa(session["tenant_id"]),
+                                  resumen_diario=obtener_resumen_diario(session["tenant_id"]),
                                   contacto=os.environ.get("CONTACTO_EMAIL", "").strip(),
                                   mensaje=request.args.get("ok"), error=request.args.get("error"))
 
@@ -288,6 +302,15 @@ def cambiar_programa():
     if guardar_programa(session["tenant_id"], request.form.get("programa", "")):
         return redirect(url_for("alta.conexiones", ok="Programa guardado."))
     return redirect(url_for("alta.conexiones", error="No se pudo guardar el programa."))
+
+
+@bp_alta.route("/conexiones/resumen", methods=["POST"])
+@login_requerido
+def cambiar_resumen():
+    activo = request.form.get("resumen") == "1"
+    if guardar_resumen_diario(session["tenant_id"], activo):
+        return redirect(url_for("alta.conexiones", ok="Resumen diario " + ("activado." if activo else "apagado.")))
+    return redirect(url_for("alta.conexiones", error="No se ha podido guardar el cambio."))
 
 
 @bp_alta.route("/conexiones/periodicidad", methods=["POST"])

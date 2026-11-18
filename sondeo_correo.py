@@ -105,6 +105,22 @@ def ciclo_correo():
         revisar_plazos()
     except Exception:
         log.exception("Error revisando los plazos")
+    try:  # resumen diario por correo (apagable) y aviso de proveedores que parecen repetidos
+        from notificaciones import enviar_resumen_diario
+        enviar_resumen_diario()
+    except Exception:
+        log.exception("Error mandando el resumen diario")
+    try:
+        from proveedores_duplicados import avisar_duplicados
+        from basededatos import notificacion_reciente, registrar_notificacion, TENANT_GLOBAL
+        from datetime import date as _d
+        marca = f"chequeo-duplicados-{_d.today().isoformat()}"
+        if not notificacion_reciente(TENANT_GLOBAL, marca, 24):
+            registrar_notificacion(TENANT_GLOBAL, marca)
+            for t in tenants_con_correo():
+                avisar_duplicados(t)
+    except Exception:
+        log.exception("Error buscando proveedores duplicados")
 
 
 def ejecutar_en_bucle():
