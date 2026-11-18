@@ -41,6 +41,7 @@ ESTRUCTURA (todos los campos son obligatorios):
   "num_factura": "texto",
   "emisor": {"cif_nif": "", "nombre": "", "domicilio": "", "localidad": "", "cp": ""},
   "destinatario": {"cif_nif": "", "nombre": ""},
+  "alumno": "",
   "desgloses": [
     {"base": 0.0, "pct_iva": 0.0, "cuota_iva": 0.0,
      "pct_recargo": null, "cuota_recargo": null,
@@ -76,7 +77,10 @@ REGLAS:
 9. es_factura_simplificada: true si pone "factura simplificada" o equivalente.
    sin_cif_destinatario: true si en ningún sitio aparece el NIF/CIF del comprador.
    formato_ticket_tpv: true si parece un recibo de datáfono/TPV y no una factura formal.
-10. confianza: que el documento sea una foto de papel, con sombras, algo torcido o con la página doblada
+10. alumno: SOLO si la factura tiene una columna o campo «ALUMNO», «ALUMN@», «ALUMNA» o similar (academias, clases)
+    con el nombre de la persona que recibe el servicio, pon ese nombre tal cual; si no existe ese campo, "".
+    No lo confundas con el destinatario: el destinatario sigue siendo quien figura como cliente en el recuadro de datos.
+11. confianza: que el documento sea una foto de papel, con sombras, algo torcido o con la página doblada
     NO baja la confianza si todos los datos se leen con claridad. "alta" si todo se lee con claridad; "media" si algún dato secundario es dudoso;
     "baja" si el CIF, los importes o el total no se leen con seguridad, o si la suma de bases
     y cuotas no coincide con el total.
@@ -187,6 +191,7 @@ def _leer(contenido: bytes, modelo=None) -> dict:
         datos.setdefault("es_factura_simplificada", False)
         datos.setdefault("sin_cif_destinatario", not (datos.get("destinatario") or {}).get("cif_nif"))
         datos.setdefault("formato_ticket_tpv", False)
+        datos.setdefault("alumno", "")
         return datos
 
     except json.JSONDecodeError:

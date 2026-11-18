@@ -459,6 +459,19 @@ def _archivar(storage, tenant_id, contenido, nombre_original, factura, diferir=F
     destinatario = factura.get("destinatario") or {}
     cif = _normaliza_cif(destinatario.get("cif_nif"))
 
+    # Academias y similares: la factura trae una columna «alumno» y, en el recuadro de cliente, los datos del propio titular
+    # (la academia no imprime su NIF). Es una venta de ese cliente y el cliente de la venta es el alumno, no la empresa.
+    alumno = (factura.get("alumno") or "").strip()
+    emisor_previo = _normaliza_cif((factura.get("emisor") or {}).get("cif_nif"))
+    if alumno and cif and (not emisor_previo or emisor_previo == cif) and resolver_empresa_cliente_por_cif(tenant_id, [cif]):
+        factura = {**factura,
+                   "emisor": {**(factura.get("emisor") or {}), "cif_nif": cif},
+                   "destinatario": {"cif_nif": "", "nombre": alumno},
+                   "sin_cif_destinatario": True, "es_factura_simplificada": False, "formato_ticket_tpv": False}
+        destinatario = factura["destinatario"]
+        emisor_cif = cif
+        cif = ""
+
     # Factura EMITIDA por un cliente de la gestoría (una venta suya): el comprador es un cliente de SU cliente, no de la gestoría.
     # Se archiva en el cliente emisor (hoja VENTAS) y no se da de alta al comprador.
     emisor_cif = _normaliza_cif((factura.get("emisor") or {}).get("cif_nif"))
