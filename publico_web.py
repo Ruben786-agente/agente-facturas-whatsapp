@@ -165,14 +165,13 @@ def _meta(titulo_seo, descripcion, ruta):
 PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su programa contable", CABECERA + """
 <section class="p-hero"><div class="p-hero-in">
   <h1>Las facturas llegan o las sube usted. El Excel ya está hecho.</h1>
-  <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en el formato de miEos y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive.</p>
+  <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en el formato de miEos y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive. <strong>ContaSOL y Sage 50:</strong> disponibles en pruebas. <strong>a3, Glasof y otros:</strong> preparamos su formato al registrarse.</p>
   <div class="acciones-hero">
     {% if logueada %}<a class="btn principal" href="{{ url_for('panel.panel') }}">Ir al panel</a>
     {% else %}<a class="btn principal" href="{{ url_for('alta.registro') }}">Probar 14 días gratis</a>
     <a class="btn sec" href="{{ url_for('panel.login') }}">Ya tengo cuenta</a>{% endif %}
   </div>
   <p class="nota-hero">Sin tarjeta para empezar. Cancele cuando quiera.</p>
-  <p class="nota-hero"><strong>Hoy:</strong> miEos, listo para importar. <strong>ContaSOL y Sage 50:</strong> disponibles en pruebas. <strong>a3, Glasof y otros:</strong> preparamos su formato al registrarse.</p>
 </div></section>
 
 <section class="p-sec">
