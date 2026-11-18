@@ -17,8 +17,8 @@ bp_impuestos = Blueprint("impuestos", __name__)
 
 PLANTILLA = pagina("Impuestos", """
 <main class="pagina">
-  <h1 style="font-size:34px;">Impuestos (borrador)</h1>
-  <p class="tenue" style="margin-top:10px;">Borrador <strong>orientativo</strong> del modelo 303 (IVA) y del 130 (IRPF de autónomos), calculado con las facturas ya anotadas en los Excel del cliente.
+  <h1 style="font-size:34px;">Impuestos (borrador) <small style="font-size:16px;">· función en pruebas</small></h1>
+  <p class="tenue" style="margin-top:10px;">Esta función está <strong>en pruebas</strong>: compare siempre el resultado con un trimestre ya presentado. Borrador <strong>orientativo</strong> del modelo 303 (IVA) y del 130 (IRPF de autónomos), calculado con las facturas ya anotadas en los Excel del cliente.
   No presenta nada: sirve para adelantar trabajo y debe revisarlo usted antes de presentar.</p>
   <form method="get" class="estado-linea" style="margin-top:20px; gap:8px; flex-wrap:wrap;">
     <select name="cif" aria-label="Cliente" required>
