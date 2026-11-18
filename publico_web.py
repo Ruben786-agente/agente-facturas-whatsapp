@@ -188,7 +188,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
 
 <section class="p-sec">
   <h2>Programas contables</h2>
-  <p class="intro">Hoy el Excel sale en el formato de miEos, listo para importar. Estamos preparando los demás programas y priorizamos los que más nos pidan.</p>
+  <p class="intro">Hoy el Excel sale en el formato de miEos, listo para importar. &iquest;Usa otro programa? D&iacute;galo al registrarse y preparamos su formato: le pediremos un fichero de ejemplo con datos ficticios. Priorizamos los que m&aacute;s nos pidan.</p>
   <div class="progs">
     <span class="prog ok">miEos &middot; disponible</span>
     <span class="prog">Sage &middot; en preparaci&oacute;n</span>
@@ -196,7 +196,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
     <span class="prog">Glasof &middot; en preparaci&oacute;n</span>
     <span class="prog">a3 &middot; en preparaci&oacute;n</span>
   </div>
-  {% if d.email %}<p class="intro">&iquest;Usa otro programa? Cu&eacute;ntenoslo en <a href="mailto:{{ d.email }}?subject=Mi%20programa%20contable">{{ d.email }}</a> y lo tendremos en cuenta.</p>{% endif %}
+  {% if d.email %}<p class="intro">&iquest;Prefiere consultarlo antes? Escr&iacute;banos a <a href="mailto:{{ d.email }}?subject=Mi%20programa%20contable">{{ d.email }}</a>.</p>{% endif %}
 </section>
 
 <section class="p-sec">
@@ -443,7 +443,8 @@ def _precios_ia():
 
 @bp_publico.route("/admin/uso-ia")
 def uso_ia():
-    from basededatos import email_de_gestoria, obtener_comparacion, obtener_motivos_pendientes, obtener_uso_ia
+    from basededatos import (email_de_gestoria, obtener_comparacion, obtener_motivos_pendientes, obtener_programas_gestorias,
+                             obtener_uso_ia)
     admin = os.environ.get("ADMIN_EMAIL", "").strip().lower()
     tenant = session.get("tenant_id")
     if not admin or not tenant or (email_de_gestoria(tenant) or "").lower() != admin:
@@ -463,6 +464,7 @@ def uso_ia():
     total_llamadas = sum(m["llamadas"] for m in resumen)
     comparadas, coinciden = obtener_comparacion()
     motivos = obtener_motivos_pendientes()
+    programas_gestorias = obtener_programas_gestorias()
     plantilla = pagina("Consumo de la IA", """
 <main class="pagina" style="padding-top:40px;max-width:980px;">
   <h1 style="font-size:32px;">Consumo de la IA</h1>
@@ -489,6 +491,13 @@ def uso_ia():
   </table>
   {% else %}<p class="tenue">Ahora mismo no hay nada pendiente de revisar.</p>{% endif %}
 
+  <h2 style="font-size:20px;margin-top:26px;">Programa contable de cada gestoría</h2>
+  <p class="tenue">Las que no usan miEOS están arriba: son las que esperan su formato.</p>
+  <table style="width:100%;border-collapse:collapse;margin-top:8px;">
+    <tr><th align="left">Gestoría</th><th align="left">Email</th><th align="left">Programa</th><th align="left">Alta</th></tr>
+    {% for g in programas_gestorias %}<tr><td>{{ g.nombre }}</td><td>{{ g.email }}</td><td>{% if g.pendiente %}<strong>{{ g.programa }}</strong> (formato pendiente){% else %}{{ g.programa }}{% endif %}</td><td>{{ g.creada }}</td></tr>{% endfor %}
+  </table>
+
   <h2 style="font-size:20px;margin-top:26px;">Por día</h2>
   <table style="width:100%;border-collapse:collapse;margin-top:8px;">
     <tr><th align="left">Día</th><th align="left">Modelo</th><th align="right">Llamadas</th><th align="right">Tokens entrada</th><th align="right">Tokens salida</th><th align="right">Coste (USD)</th></tr>
@@ -498,4 +507,5 @@ def uso_ia():
   <p class="tenue" style="margin-top:16px;">Precios usados (USD por millón de tokens, entrada / salida): {% for k, v in precios.items() %}{{ k }}: {{ v[0] }} / {{ v[1] }}{% if not loop.last %}; {% endif %}{% endfor %}. Confírmelos en la consola de Anthropic.</p>
 </main>""")
     return render_template_string(plantilla, filas=filas, resumen=resumen, total_usd=total_usd, total_llamadas=total_llamadas,
-                                  comparadas=comparadas, coinciden=coinciden, precios=precios, motivos=motivos)
+                                  comparadas=comparadas, coinciden=coinciden, precios=precios, motivos=motivos,
+                                  programas_gestorias=programas_gestorias)

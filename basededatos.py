@@ -24,6 +24,12 @@ def _uuid_column(**kwargs):
     return Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()), **kwargs)
 
 
+# Programas contables que ofrece el selector del registro. Hoy solo miEOS tiene formato probado.
+PROGRAMAS = [("mieos", "miEOS"), ("sage", "Sage"), ("contasol", "ContaSOL"), ("a3", "A3"),
+             ("glasof", "Glasof"), ("holded", "Holded"), ("otro", "Otro")]
+PROGRAMA_LISTO = "mieos"
+
+
 class Gestoria(Base):
     __tablename__ = "gestorias"
     tenant_id = _uuid_column()
@@ -37,6 +43,7 @@ class Gestoria(Base):
     carpeta_sin_identificar_id = Column(String)
     periodicidad = Column(String, nullable=False, default="mensual", server_default="mensual")  # del Excel: mensual | trimestral
     alta_automatica = Column(Boolean, nullable=False, default=True, server_default="1")  # dar de alta clientes nuevos con la primera factura
+    programa_contable = Column(String, nullable=False, default="mieos", server_default="mieos")  # programa que usa la gestoría (ver PROGRAMAS)
     activa = Column(Boolean, nullable=False, default=True)
     creada_en = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
@@ -285,6 +292,13 @@ def _anadir_columnas_nuevas(motor):
                 conexion.execute(text("ALTER TABLE gestorias ADD COLUMN alta_automatica BOOLEAN NOT NULL DEFAULT TRUE"))
     except Exception:
         log.exception("No se pudo añadir la columna alta_automatica a las gestorías")
+    try:
+        columnas = {c["name"] for c in inspect(motor).get_columns("gestorias")}
+        if "programa_contable" not in columnas:
+            with motor.begin() as conexion:
+                conexion.execute(text("ALTER TABLE gestorias ADD COLUMN programa_contable VARCHAR NOT NULL DEFAULT 'mieos'"))
+    except Exception:
+        log.exception("No se pudo añadir la columna programa_contable a las gestorías")
     try:
         columnas = {c["name"] for c in inspect(motor).get_columns("empresas_cliente")}
         if "periodicidad" not in columnas:
@@ -1033,11 +1047,13 @@ def marcar_correo_procesado(tenant_id, mensaje_id):
 # Suscripción / prueba gratuita
 # ---------------------------------------------------------------------------
 
-def crear_gestoria_prueba(nombre, email_contacto, dias_prueba=14):
+def crear_gestoria_prueba(nombre, email_contacto, dias_prueba=14, programa=PROGRAMA_LISTO):
+    if programa not in dict(PROGRAMAS):
+        programa = PROGRAMA_LISTO
     session = _obtener_session()
     try:
         gestoria = Gestoria(
-            nombre=nombre, email_contacto=email_contacto, plan_suscripcion="trial",
+            nombre=nombre, email_contacto=email_contacto, plan_suscripcion="trial", programa_contable=programa,
             trial_expira_en=datetime.now(timezone.utc) + timedelta(days=dias_prueba), activa=True,
         )
         session.add(gestoria)
@@ -1331,6 +1347,48 @@ def listar_subidas(tenant_id, dias=3, limite=40):
                  .order_by(SubidaEstado.creado_en.desc()).limit(limite).all())
         return [{"id": s.id, "nombre": s.nombre, "estado": s.estado, "hechos": s.hechos, "total": s.total, "resumen": s.resumen,
                  "creado_en": _como_aware_utc(s.creado_en), "actualizado_en": _como_aware_utc(s.actualizado_en)} for s in filas]
+    finally:
+        session.close()
+
+
+def obtener_programa(tenant_id):
+    """Programa contable que dijo usar la gestoría (clave de PROGRAMAS)."""
+    session = _obtener_session()
+    try:
+        g = session.query(Gestoria).filter_by(tenant_id=tenant_id).first()
+        valor = getattr(g, "programa_contable", None) if g else None
+        return valor if valor in dict(PROGRAMAS) else PROGRAMA_LISTO
+    finally:
+        session.close()
+
+
+def guardar_programa(tenant_id, programa):
+    if programa not in dict(PROGRAMAS):
+        return False
+    session = _obtener_session()
+    try:
+        g = session.query(Gestoria).filter_by(tenant_id=tenant_id).first()
+        if not g:
+            return False
+        g.programa_contable = programa
+        session.commit()
+        return True
+    finally:
+        session.close()
+
+
+def obtener_programas_gestorias():
+    """Para el titular: qué programa usa cada gestoría, las que no usan miEOS primero."""
+    session = _obtener_session()
+    try:
+        filas = []
+        for g in session.query(Gestoria).filter_by(activa=True).order_by(Gestoria.creada_en.desc()).all():
+            clave = getattr(g, "programa_contable", None) or PROGRAMA_LISTO
+            filas.append({"nombre": g.nombre, "email": g.email_contacto, "programa": dict(PROGRAMAS).get(clave, clave),
+                          "pendiente": clave != PROGRAMA_LISTO,
+                          "creada": g.creada_en.strftime("%d/%m/%Y") if g.creada_en else ""})
+        filas.sort(key=lambda f: not f["pendiente"])
+        return filas
     finally:
         session.close()
 

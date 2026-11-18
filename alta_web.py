@@ -18,7 +18,7 @@ from flask import Blueprint, redirect, render_template_string, request, session,
 import autenticacion_google as google
 import autenticacion_onedrive as microsoft
 from almacenamiento import obtener_almacenamiento
-from basededatos import (crear_gestoria_prueba, establecer_password, existe_email_gestoria,
+from basededatos import (PROGRAMAS, PROGRAMA_LISTO, crear_gestoria_prueba, guardar_programa, obtener_programa, establecer_password, existe_email_gestoria,
                          guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial,
                          eliminar_gestoria, email_de_gestoria, obtener_suscripcion_stripe, verificar_login,
                          obtener_periodicidad, guardar_periodicidad)
@@ -40,6 +40,11 @@ PLANTILLA_REGISTRO = acceso("Crear cuenta", """
     <input id="nombre" name="nombre" autocomplete="organization" required autofocus>
     <label for="email">Email</label>
     <input id="email" type="email" name="email" autocomplete="email" required>
+    <label for="programa">Programa contable que usa</label>
+    <select id="programa" name="programa" onchange="document.getElementById('aviso-programa').style.display = this.value === 'mieos' ? 'none' : 'block';">
+      {% for clave, etiqueta in programas %}<option value="{{ clave }}" {% if clave == programa_elegido %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}
+    </select>
+    <p id="aviso-programa" class="tenue" style="display:{{ 'none' if programa_elegido == 'mieos' else 'block' }};font-size:14px;margin:8px 0 0;">Hoy el Excel sale en formato miEOS. Para su programa preparamos el formato: podrá usar el agente desde ya, y le pediremos un fichero de ejemplo <strong>con datos ficticios</strong> para tenerlo listo.</p>
     <label for="password">Contraseña</label>
     <input id="password" type="password" name="password" autocomplete="new-password" required minlength="8">
     <ul id="reglas" style="list-style:none;margin:10px 0 0;padding:0;font-size:14px;line-height:1.7;color:var(--tinta-3);">
@@ -183,6 +188,23 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
 
     <section class="paso opcional">
       <span class="n">+</span>
+      <h3>Su programa contable</h3>
+      <form method="post" action="{{ url_for('alta.cambiar_programa') }}" class="estado-linea">
+        <select name="programa" aria-label="Programa contable" style="max-width:220px;">
+          {% for clave, etiqueta in programas %}<option value="{{ clave }}" {% if clave == programa %}selected{% endif %}>{{ etiqueta }}</option>{% endfor %}
+        </select>
+        <button class="btn" type="submit">Guardar</button>
+      </form>
+      {% if programa == "mieos" %}
+        <p class="que" style="margin-top:8px;">El Excel sale en el formato de miEOS, listo para importar.</p>
+      {% else %}
+        <p class="que" style="margin-top:8px;">Hoy el Excel sale en formato miEOS. Estamos preparando el formato de su programa. Para ello nos ayudaría un fichero de ejemplo de importación de su programa, <strong>con datos ficticios</strong> (no mande datos reales de sus clientes).
+        {% if contacto %}Puede enviarlo a <a href="mailto:{{ contacto }}?subject=Fichero%20de%20ejemplo">{{ contacto }}</a>.{% endif %}</p>
+      {% endif %}
+    </section>
+
+    <section class="paso opcional">
+      <span class="n">+</span>
       <h3>WhatsApp <small>(opcional)</small></h3>
       <p class="que">Próximamente podrá recibir también las facturas que sus clientes envíen por WhatsApp.</p>
     </section>
@@ -225,6 +247,7 @@ def registro():
         nombre = request.form.get("nombre", "").strip()
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
+        programa = request.form.get("programa", PROGRAMA_LISTO)
         error = None
         if not nombre or not _EMAIL.match(email):
             error = "Revise el nombre y el email."
@@ -235,13 +258,13 @@ def registro():
         elif existe_email_gestoria(email):
             error = "Ya existe una cuenta con ese email."
         if error:
-            return render_template_string(PLANTILLA_REGISTRO, error=error)
-        tenant_id = crear_gestoria_prueba(nombre, email)
+            return render_template_string(PLANTILLA_REGISTRO, error=error, programas=PROGRAMAS, programa_elegido=programa)
+        tenant_id = crear_gestoria_prueba(nombre, email, programa=programa)
         establecer_password(tenant_id, password)
         session.clear()
         session["tenant_id"] = tenant_id
         return redirect(url_for("alta.conexiones"))
-    return render_template_string(PLANTILLA_REGISTRO, error=None)
+    return render_template_string(PLANTILLA_REGISTRO, error=None, programas=PROGRAMAS, programa_elegido=PROGRAMA_LISTO)
 
 
 @bp_alta.route("/conexiones")
@@ -252,7 +275,17 @@ def conexiones():
     return render_template_string(PLANTILLA_CONEXIONES, e=estado, gestoria_nombre=estado["nombre"],
                                   entrada_activa=estado["almacenamiento"] == "onedrive",
                                   periodicidad=obtener_periodicidad(session["tenant_id"]),
+                                  programas=PROGRAMAS, programa=obtener_programa(session["tenant_id"]),
+                                  contacto=os.environ.get("CONTACTO_EMAIL", "").strip(),
                                   mensaje=request.args.get("ok"), error=request.args.get("error"))
+
+
+@bp_alta.route("/conexiones/programa", methods=["POST"])
+@login_requerido
+def cambiar_programa():
+    if guardar_programa(session["tenant_id"], request.form.get("programa", "")):
+        return redirect(url_for("alta.conexiones", ok="Programa guardado."))
+    return redirect(url_for("alta.conexiones", error="No se pudo guardar el programa."))
 
 
 @bp_alta.route("/conexiones/periodicidad", methods=["POST"])
