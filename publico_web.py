@@ -28,15 +28,22 @@ bp_publico = Blueprint("publico", __name__)
 VERSION_LEGAL = "2026-10"
 
 
+def _con_euro(valor):
+    """Si en Render solo pusieron la cifra ("99"), añade el símbolo: "99 €"."""
+    import re
+    valor = (valor or "").strip()
+    return valor + " €" if re.fullmatch(r"\d+(?:[.,]\d+)?", valor) else valor
+
+
 def _datos():
     def v(nombre):
         return os.environ.get(nombre, "").strip() or "[PENDIENTE]"
-    precio = os.environ.get("PRECIO_MENSUAL", "").strip()
+    precio = _con_euro(os.environ.get("PRECIO_MENSUAL", ""))
     return {
         "nombre": v("TITULAR_NOMBRE"), "nif": v("TITULAR_NIF"), "domicilio": v("TITULAR_DOMICILIO"),
         "email": v("CONTACTO_EMAIL"), "jurisdiccion": v("JURISDICCION"),
         "precio": f"{precio} al mes + IVA" if precio else "",
-        "promo": (os.environ.get("PRECIO_PROMO", "").strip() + " al mes + IVA") if os.environ.get("PRECIO_PROMO", "").strip() else "",
+        "promo": (_con_euro(os.environ.get("PRECIO_PROMO", "")) + " al mes + IVA") if os.environ.get("PRECIO_PROMO", "").strip() else "",
         "promo_nota": os.environ.get("PROMO_NOTA", "").strip(),
         "url": os.environ.get("URL_PUBLICA", "https://agentefacturas.es").rstrip("/"),
         "anio": date.today().year, "version": VERSION_LEGAL,
