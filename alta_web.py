@@ -214,7 +214,7 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
         <p class="que" style="margin-top:8px;">Al pulsar «Descargar Excel» recibirá un ZIP con los ficheros de importación de su programa (y un LEEME con los pasos). Es un formato nuevo: <strong>pruebe primero con un solo cliente</strong> y revise lo importado antes de seguir. Si algo no cuadra, avísenos.</p>
       {% else %}
         <p class="que" style="margin-top:8px;">Hoy el Excel sale en formato miEOS. Estamos preparando el formato de su programa. Para ello nos ayudaría un fichero de ejemplo de importación de su programa, <strong>con datos ficticios</strong> (no mande datos reales de sus clientes).
-        {% if contacto %}Puede enviarlo a <a href="mailto:{{ contacto }}?subject=Fichero%20de%20ejemplo">{{ contacto }}</a>.{% endif %}</p>
+        {% if contacto %}Puede enviarlo a <a href="mailto:{{ contacto }}?subject=Fichero%20de%20ejemplo">{{ contacto }}</a>{% endif %}</p>
       {% endif %}
     </section>
 

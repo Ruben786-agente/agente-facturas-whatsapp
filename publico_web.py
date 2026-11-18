@@ -222,7 +222,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su
     <span class="prog">Glasof &middot; en preparaci&oacute;n</span>
     <span class="prog">a3 &middot; en preparaci&oacute;n</span>
   </div>
-  {% if d.email %}<p class="intro">&iquest;Prefiere consultarlo antes? Escr&iacute;banos a <a href="mailto:{{ d.email }}?subject=Mi%20programa%20contable">{{ d.email }}</a>.</p>{% endif %}
+  {% if d.email %}<p class="intro">&iquest;Prefiere consultarlo antes? Escr&iacute;banos a <a href="mailto:{{ d.email }}?subject=Mi%20programa%20contable">{{ d.email }}</a></p>{% endif %}
 </section>
 
 <section class="p-sec">
@@ -239,7 +239,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su
   <h2>{% if d.mostrar_precio %}Un solo plan, todo incluido{% else %}Planes y precios{% endif %}</h2>
   <div class="precio-caja">
     {% if not d.mostrar_precio %}<div class="cifra-p" style="font-size:30px;">Consulte los planes</div>
-    <div class="precio-habitual">El precio depende del volumen de facturas de su gestoría. Se lo indicamos antes de contratar.{% if d.email %} Escríbanos a <a href="mailto:{{ d.email }}?subject=Planes%20y%20precios">{{ d.email }}</a>.{% endif %}</div>
+    <div class="precio-habitual">El precio depende del volumen de facturas de su gestoría. Se lo indicamos antes de contratar.{% if d.email %} Escríbanos a <a href="mailto:{{ d.email }}?subject=Planes%20y%20precios">{{ d.email }}</a>{% endif %}</div>
     {% elif d.promo %}<div class="etiqueta-promo">Precio de lanzamiento</div>
     <div class="cifra-p">{{ d.promo }}</div>
     {% if d.precio %}<div class="precio-habitual">Precio habitual: <s>{{ d.precio }}</s></div>{% endif %}
@@ -289,7 +289,7 @@ PLANTILLA_TERMINOS = _legal("Condiciones del servicio", """
 <p class="version">Versión {{ d.version }}</p>
 
 <h2>1. Quién presta el servicio</h2>
-<p>El servicio «Agente Facturas» (en adelante, el Servicio) lo presta {{ d.nombre }}, con NIF {{ d.nif }} y domicilio en {{ d.domicilio }} (en adelante, el Prestador). Contacto: {{ d.email }}.</p>
+<p>El servicio «Agente Facturas» (en adelante, el Servicio) lo presta {{ d.nombre }}, con NIF {{ d.nif }} y domicilio en {{ d.domicilio }} (en adelante, el Prestador). Contacto: {{ d.email }}</p>
 
 <h2>2. En qué consiste</h2>
 <p>El Servicio lee, mediante inteligencia artificial, las facturas y tickets que llegan como adjunto al correo electrónico de la gestoría usuaria (en adelante, el Cliente), los anota en hojas de Excel por empresa y periodo (mes o trimestre), y los archiva en el almacenamiento (OneDrive o Google Drive) que el Cliente conecta. También ofrece un panel web para consultar y corregir lo leído.</p>
@@ -335,7 +335,7 @@ PLANTILLA_PRIVACIDAD = _legal("Política de privacidad", """
 <p class="version">Versión {{ d.version }}</p>
 
 <h2>1. Responsable del tratamiento</h2>
-<p>{{ d.nombre }}, NIF {{ d.nif }}, domicilio {{ d.domicilio }}. Contacto de privacidad: {{ d.email }}.</p>
+<p>{{ d.nombre }}, NIF {{ d.nif }}, domicilio {{ d.domicilio }}. Contacto de privacidad: {{ d.email }}</p>
 <p>Esta política se refiere a los datos de las <strong>personas que usan el panel</strong> (gestorías). Los datos de los clientes finales de la gestoría que aparecen en las facturas los trata el Prestador como <em>encargado del tratamiento</em>, en nombre de la gestoría: véase el <a href="{{ url_for('publico.encargo') }}">contrato de encargo</a>.</p>
 
 <h2>2. Qué datos tratamos y para qué</h2>
@@ -365,7 +365,7 @@ PLANTILLA_PRIVACIDAD = _legal("Política de privacidad", """
 <p>Mientras mantenga su cuenta. Puede eliminarla desde el panel («Eliminar mi cuenta y mis datos») y se borran todos los datos del Servicio de forma inmediata. Los datos de facturación pueden conservarse el tiempo que exija la normativa fiscal.</p>
 
 <h2>5. Sus derechos</h2>
-<p>Puede ejercer sus derechos de acceso, rectificación, supresión, oposición, limitación y portabilidad escribiendo a {{ d.email }}. Si considera que no hemos tratado sus datos correctamente, puede reclamar ante la Agencia Española de Protección de Datos (www.aepd.es).</p>
+<p>Si considera que no hemos tratado sus datos correctamente, puede reclamar ante la Agencia Española de Protección de Datos (www.aepd.es). Puede ejercer sus derechos de acceso, rectificación, supresión, oposición, limitación y portabilidad escribiendo a {{ d.email }}</p>
 
 <h2>6. Seguridad</h2>
 <p>Aplicamos medidas técnicas y organizativas adecuadas: comunicaciones cifradas, accesos y credenciales guardados cifrados, contraseñas protegidas, separación de los datos de cada gestoría y límite de intentos de acceso. Ante una brecha que le afecte, se lo comunicaremos sin dilación indebida.</p>
