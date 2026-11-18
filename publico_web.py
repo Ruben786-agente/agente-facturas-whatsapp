@@ -153,7 +153,7 @@ def _meta(titulo_seo, descripcion, ruta):
 # Inicio
 # ---------------------------------------------------------------------------
 
-PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de miEos", CABECERA + """
+PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su programa contable", CABECERA + """
 <section class="p-hero"><div class="p-hero-in">
   <h1>Las facturas llegan o las sube usted. El Excel ya está hecho.</h1>
   <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en el formato de miEos y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive.</p>
@@ -232,14 +232,14 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
   <h2>Preguntas frecuentes</h2>
   <details><summary>¿Qué necesito para empezar?</summary><p>Una cuenta de correo (Gmail u Outlook / Microsoft 365) y un almacenamiento (OneDrive o Google Drive). Si su Microsoft 365 es de empresa, puede que un administrador tenga que aprobar el permiso una sola vez; le damos un enlace para enviárselo.</p></details>
   <details><summary>¿Y si la IA se equivoca?</summary><p>Lo que no está claro no se anota en el Excel: va a Revisión con el motivo, y usted lo corrige o lo da por revisado desde el panel. El agente es una ayuda y no sustituye su revisión profesional: usted siempre tiene la última palabra.</p></details>
-  <details><summary>¿Con qué programas contables funciona?</summary><p>Hoy genera el Excel en el formato de miEos. Estamos preparando Sage, ContaSOL, Glasof y a3; si usa otro programa, cuéntenoslo y lo valoramos. No anunciamos un programa como disponible hasta haberlo probado.</p></details>
+  <details><summary>¿Con qué programas contables funciona?</summary><p>Hoy genera el Excel en el formato de miEos. Preparamos Sage, ContaSOL, Glasof y a3 a petición: dígalo al registrarse y le pediremos un fichero de ejemplo con datos ficticios. Si usa otro programa, cuéntenoslo y lo valoramos. No anunciamos un programa como disponible hasta haberlo probado.</p></details>
   <details><summary>¿Qué documentos lee?</summary><p>Facturas y tickets que lleguen como adjunto al correo, en PDF o imagen. Si el destinatario no se reconoce o falta el CIF, el documento se aparta para que usted lo identifique.</p></details>
   <details><summary>¿Dónde se guardan mis archivos?</summary><p>En su OneDrive o Google Drive, no en nuestros servidores. Nosotros solo guardamos los datos necesarios para que el panel funcione: qué facturas se han leído y su estado.</p></details>
   <details><summary>¿Puedo cancelar cuando quiera?</summary><p>Sí. No hay permanencia. Y si lo desea, puede borrar su cuenta y todos sus datos desde el propio panel.</p></details>
 </section>
 """ + PIE, barra=False, extra_head=_meta(
-    "Agente Facturas: las facturas de sus clientes, directas al Excel de miEos",
-    "El agente lee las facturas que llegan al correo de su gestoría, las anota en Excel con formato miEos y las archiva en OneDrive o Google Drive. Pruébelo 14 días gratis.",
+    "Agente Facturas: las facturas de sus clientes, directas al Excel de su programa contable",
+    "El agente lee las facturas del correo de su gestoría y las deja en Excel para su programa contable (miEos hoy; Sage, ContaSOL, a3 y Glasof a petición). 14 días gratis.",
     "/"))
 
 
