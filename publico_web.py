@@ -163,6 +163,7 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de mi
     <a class="btn sec" href="{{ url_for('panel.login') }}">Ya tengo cuenta</a>{% endif %}
   </div>
   <p class="nota-hero">Sin tarjeta para empezar. Cancele cuando quiera.</p>
+  <p class="nota-hero"><strong>Hoy:</strong> miEos, listo para importar. <strong>Sage, ContaSOL, a3 y Glasof:</strong> preparamos su formato al registrarse.</p>
 </div></section>
 
 <section class="p-sec">
