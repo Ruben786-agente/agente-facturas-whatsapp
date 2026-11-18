@@ -145,6 +145,7 @@ BARRA = (
     '<a href="{{ url_for(\'subida.subir\') }}" {% if activa == \'subir\' %}class="activa" aria-current="page"{% endif %}>Subir facturas</a>'
     '<a href="{{ url_for(\'archivos.inicio\') }}" {% if activa == \'archivos\' %}class="activa" aria-current="page"{% endif %}>Archivos</a>'
     '<a href="{{ url_for(\'clientes.lista\') }}" {% if activa == \'clientes\' %}class="activa" aria-current="page"{% endif %}>Clientes</a>'
+    '<a href="{{ url_for(\'impuestos.borrador\') }}" {% if activa == \'impuestos\' %}class="activa" aria-current="page"{% endif %}>Impuestos <small>(en pruebas)</small></a>'
     '<a href="{{ url_for(\'actividad.lista\') }}" {% if activa == \'actividad\' %}class="activa" aria-current="page"{% endif %}>Actividad</a>'
     '<a href="{{ url_for(\'alta.conexiones\') }}" {% if activa == \'conexiones\' %}class="activa" aria-current="page"{% endif %}>Conexiones y suscripción</a>'
     '</nav>'
