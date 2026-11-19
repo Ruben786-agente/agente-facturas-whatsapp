@@ -140,11 +140,17 @@ def _guardar_ticket(storage, tenant_id, empresa, nombre, contenido, factura):
     return {"accion": "ticket", "empresa": empresa["nombre"], "cif": empresa["cif_nif"], "posible_duplicado": bool(posible_duplicado)}
 
 
+def _num_norm(numero):
+    """Número de factura comparable: sin espacios ni signos y sin ceros a la izquierda ('2026/001' = '2026-1')."""
+    trozos = re.split(r"[^A-Z0-9]+", (numero or "").upper())
+    return "".join(t.lstrip("0") for t in trozos if t)
+
+
 def _se_parece_a_una_anotada(tenant_id, empresa, factura, numero, cif_emisor, total):
     """Casi-duplicados que el control exacto no ve. Devuelve el motivo, o None si no hay nada sospechoso."""
     nombre = _palabras((factura.get("emisor") or {}).get("nombre"))
     for f in _registradas(tenant_id, empresa["cif_nif"]):
-        if f.get("destino") != "PROCESADA" or f["num_factura"] != numero:
+        if f.get("destino") != "PROCESADA" or _num_norm(f["num_factura"]) != _num_norm(numero):
             continue
         cif_f = _normaliza_cif(f["emisor"].get("cif_nif"))
         mismo_total = abs(f["total_factura"] - total) <= 0.01
@@ -261,11 +267,18 @@ def _guardar_factura(storage, tenant_id, empresa, nombre, contenido, factura, re
 
     if numero:
         for f in _registradas(tenant_id, empresa["cif_nif"]):
-            if (f.get("destino") == "PROCESADA" and f["num_factura"] == numero
+            if (f.get("destino") == "PROCESADA" and _num_norm(f["num_factura"]) == _num_norm(numero)
                     and _normaliza_cif(f["emisor"].get("cif_nif")) == cif_emisor
                     and abs(f["total_factura"] - total) <= 0.01):
                 return {"accion": "duplicado_exacto", "empresa": empresa["nombre"], "cif": empresa["cif_nif"]}
 
+    if not numero and cif_emisor and total and not reintento:   # sin número no hay control exacto: se compara proveedor, fecha e importe
+        fecha = str(factura.get("fecha_factura") or "")
+        for f in _registradas(tenant_id, empresa["cif_nif"]):
+            if (f.get("destino") == "PROCESADA" and _normaliza_cif(f["emisor"].get("cif_nif")) == cif_emisor
+                    and str(f.get("fecha_factura")) == fecha and abs(f["total_factura"] - total) <= 0.01):
+                return _a_revision(storage, tenant_id, empresa, nombre, contenido, factura,
+                                   "sin número de factura, pero mismo proveedor, fecha e importe que otra ya anotada (posible duplicado)")
     if numero and not reintento:
         sospechosa = _se_parece_a_una_anotada(tenant_id, empresa, factura, numero, cif_emisor, total)
         if sospechosa:
