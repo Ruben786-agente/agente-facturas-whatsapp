@@ -77,6 +77,27 @@ CSS_PUBLICO = """
   .p-hero .btn.sec { background: transparent; color: #fff; border-color: rgba(255,255,255,.45); font-size: 17px; padding: 13px 24px; }
   .p-hero .btn.sec:hover { border-color: #fff; background: rgba(255,255,255,.08); }
   .p-hero .nota-hero { color: #9FB9C0; font-size: 14px; margin-top: 16px; }
+  .p-hero .progs-hero { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 22px; max-width: 40em; }
+  .p-hero .ph { border: 1px solid rgba(255,255,255,.3); border-radius: 999px; padding: 6px 14px; font-size: 14.5px; color: #CFE0E4; }
+  .p-hero .ph.ok { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.55); color: #fff; font-weight: 600; }
+  .p-hero .ph em { font-style: normal; font-size: 12px; opacity: .8; margin-left: 4px; text-transform: uppercase; letter-spacing: .03em; }
+  .p-hero .confianza-hero { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 0; margin: 20px 0 0; color: #9FB9C0; font-size: 14px; }
+  .p-hero .confianza-hero li::before { content: "\\2713"; margin-right: 7px; color: #CFE0E4; }
+  .p-cab .nav-p { display: flex; gap: 20px; margin-right: 8px; }
+  .p-cab .nav-p a { white-space: nowrap; color: var(--tinta-2); text-decoration: none; font-weight: 500; font-size: 15px; }
+  .p-cab .nav-p a:hover { color: var(--marca); }
+  .p-cab .marca { margin-right: 0; }
+  .p-cab .relleno { flex: 1; }
+  .p-cab a.enlace, .p-cab .btn { white-space: nowrap; }
+  .p-cab .solo-movil { display: none; }
+  .barra-cta { position: fixed; left: 50%; bottom: 18px; transform: translate(-50%, 140%); z-index: 20; display: flex; align-items: center; gap: 16px;
+    background: var(--superficie); border: 1px solid var(--linea); border-radius: 14px; padding: 10px 12px 10px 20px;
+    box-shadow: 0 8px 30px rgba(20,40,50,.16); transition: transform .35s cubic-bezier(.2,.7,.2,1); max-width: calc(100vw - 24px); }
+  .barra-cta.visible { transform: translate(-50%, 0); }
+  .barra-cta span { color: var(--tinta); font-weight: 500; }
+  .barra-cta .btn { white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) { .barra-cta { transition: none; } }
+  .p-sec { scroll-margin-top: 80px; }
   .p-sec { max-width: 1120px; margin: 0 auto; padding: 72px 24px 0; }
   .p-sec h2 { font-size: clamp(26px, 3.2vw, 36px); max-width: 22em; }
   .p-sec .intro { color: var(--tinta-2); font-size: 17px; max-width: 40em; margin-top: 12px; }
@@ -116,12 +137,19 @@ CSS_PUBLICO = """
   .legal table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 15px; }
   .legal th, .legal td { border: 1px solid var(--linea); padding: 8px 10px; text-align: left; vertical-align: top; }
   .legal th { background: var(--papel); }
+  @media (max-width: 960px) { .p-cab .nav-p { display: none; } }
+  @media (max-width: 420px) { .p-cab-in { gap: 8px; } .p-cab .marca { font-size: 17px; gap: 7px; } .p-cab .marca svg { width: 26px; height: 26px; } .p-cab .btn { padding: 7px 11px; font-size: 14px; } }
   @media (max-width: 800px) {
     .pasos-p, .rejilla { grid-template-columns: 1fr; }
     .p-hero-in { padding: 56px 20px 64px; }
     .p-sec { padding: 52px 20px 0; }
     .p-cab-in { padding: 0 16px; gap: 12px; }
     .p-cab a.enlace.oculto-movil { display: none; }
+    .p-cab .nav-p, .p-cab .marca small { display: none; }
+    .p-cab .solo-pc { display: none; }
+    .p-cab .solo-movil { display: inline; }
+    .barra-cta span { display: none; }
+    .barra-cta { padding: 8px; }
     .p-pie .resto { margin-left: 0; }
   }
 </style>
@@ -130,8 +158,11 @@ CSS_PUBLICO = """
 CABECERA = (
     '<header class="p-cab"><div class="p-cab-in">'
     '<a class="marca" href="{{ url_for(\'publico.inicio\') }}">' + LOGO + 'Agente Facturas <small style="font-weight:500;opacity:.7;font-size:.6em;margin-left:4px;">para gestorías</small></a>'
+    '<span class="relleno"></span>'
+    '<nav class="nav-p" aria-label="Secciones"><a href="{{ url_for(\'publico.inicio\') }}#como">Cómo funciona</a>'
+    '<a href="{{ url_for(\'guias.indice\') }}">Guías</a><a href="{{ url_for(\'publico.inicio\') }}#preguntas">Preguntas</a></nav>'
     '{% if logueada %}<a class="btn principal" href="{{ url_for(\'panel.panel\') }}">Ir al panel</a>'
-    '{% else %}<a class="enlace" href="{{ url_for(\'panel.login\') }}">Entrar</a>'
+    '{% else %}<a class="enlace" href="{{ url_for(\'panel.login\') }}"><span class="solo-pc">Iniciar sesión</span><span class="solo-movil">Entrar</span></a>'
     '<a class="btn principal" href="{{ url_for(\'alta.registro\') }}">Probar gratis</a>{% endif %}'
     '</div></header>'
 )
@@ -196,16 +227,19 @@ def _json_ld_inicio(plantilla_html):
 _CUERPO_INICIO = """
 <section class="p-hero"><div class="p-hero-in">
   <h1>Las facturas llegan o las sube usted. El Excel ya está hecho.</h1>
-  <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en un Excel con el formato de su programa contable y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive. <strong>miEos:</strong> disponible. <strong>Holded</strong> (facturas recibidas): disponible. <strong>ContaSOL y Sage 50:</strong> en pruebas. <strong>a3, Glasof, Sage Despachos y otros:</strong> preparamos su formato al registrarse.</p>
+  <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en un Excel con el formato de su programa contable y la archiva en la carpeta de cada cliente.</p>
+  <div class="progs-hero">
+    <span class="ph ok">miEos</span><span class="ph ok">Holded</span><span class="ph">ContaSOL <em>pruebas</em></span><span class="ph">Sage 50 <em>pruebas</em></span><span class="ph">a3, Glasof, Sage Despachos: a petición</span>
+  </div>
   <div class="acciones-hero">
     {% if logueada %}<a class="btn principal" href="{{ url_for('panel.panel') }}">Ir al panel</a>
     {% else %}<a class="btn principal" href="{{ url_for('alta.registro') }}">Probar 14 días gratis</a>
     <a class="btn sec" href="{{ url_for('panel.login') }}">Ya tengo cuenta</a>{% endif %}
   </div>
-  <p class="nota-hero">Sin tarjeta para empezar. Cancele cuando quiera.</p>
+  <ul class="confianza-hero"><li>Sin tarjeta para empezar</li><li>Sus archivos siguen en su OneDrive o Google Drive</li><li>La última palabra es siempre suya</li></ul>
 </div></section>
 
-<section class="p-sec">
+<section class="p-sec" id="como">
   <h2>Cómo funciona</h2>
   <div class="pasos-p">
     <div><h3>Conecte su correo y su almacenamiento</h3><p>Gmail u Outlook / Microsoft 365 para recibir, y OneDrive o Google Drive para archivar. Son dos clics y no instala nada.</p></div>
@@ -247,6 +281,7 @@ _CUERPO_INICIO = """
   <p class="intro">El Excel sale en el formato de miEos, y en Holded (facturas recibidas) y, en pruebas, ContaSOL y Sage 50, listo para importar. &iquest;Usa otro programa? D&iacute;galo al registrarse y preparamos su formato: le pediremos un fichero de ejemplo con datos ficticios. Priorizamos los que m&aacute;s nos pidan.</p>
   <div class="progs">
     <span class="prog ok">miEos &middot; disponible</span>
+    <span class="prog ok">Holded &middot; disponible (facturas recibidas)</span>
     <span class="prog">Sage 50 &middot; en pruebas</span>
     <span class="prog">ContaSOL &middot; en pruebas</span>
     <span class="prog">Sage Despachos &middot; en preparaci&oacute;n</span>
@@ -286,7 +321,7 @@ _CUERPO_INICIO = """
   </div>
 </section>
 
-<section class="p-sec faq">
+<section class="p-sec faq" id="preguntas">
   <h2>Preguntas frecuentes</h2>
   <details><summary>¿Qué necesito para empezar?</summary><p>Una cuenta de correo (Gmail u Outlook / Microsoft 365) y un almacenamiento (OneDrive o Google Drive). Si su Microsoft 365 es de empresa, puede que un administrador tenga que aprobar el permiso una sola vez; le damos un enlace para enviárselo.</p></details>
   <details><summary>¿Y si la IA se equivoca?</summary><p>Lo que no está claro no se anota en el Excel: va a Revisión con el motivo, y usted lo corrige o lo da por revisado desde el panel. El agente es una ayuda y no sustituye su revisión profesional: usted siempre tiene la última palabra.</p></details>
@@ -297,7 +332,24 @@ _CUERPO_INICIO = """
 </section>
 """
 
-PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su programa contable", CABECERA + _CUERPO_INICIO + PIE, barra=False, extra_head=_meta(
+_BARRA_CTA = '''{% if not logueada %}
+<div class="barra-cta" id="barra-cta" aria-hidden="true"><span>Pruebe Agente Facturas 14 días gratis, sin tarjeta</span>
+  <a class="btn principal" href="{{ url_for('alta.registro') }}" tabindex="-1">Probar gratis</a></div>
+<script>
+  (function () {
+    var b = document.getElementById('barra-cta'), h = document.querySelector('.p-hero');
+    if (!b || !h || !('IntersectionObserver' in window)) { return; }
+    new IntersectionObserver(function (e) {
+      var ver = !e[0].isIntersecting;
+      b.classList.toggle('visible', ver); b.setAttribute('aria-hidden', ver ? 'false' : 'true');
+      b.querySelector('a').tabIndex = ver ? 0 : -1;
+    }).observe(h);
+  })();
+</script>
+{% endif %}
+'''
+
+PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su programa contable", CABECERA + _CUERPO_INICIO + _BARRA_CTA + PIE, barra=False, extra_head=_meta(
     "Agente Facturas para gestorías: las facturas de sus clientes, directas al Excel de su programa contable",
     "El agente lee las facturas del correo de su gestoría y las deja en Excel para su programa contable (miEos y Holded; ContaSOL y Sage 50 en pruebas; a3, Glasof y otros a petición). 14 días gratis.",
     "/", json_ld=_json_ld_inicio(_CUERPO_INICIO)))
