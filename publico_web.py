@@ -196,7 +196,7 @@ def _json_ld_inicio(plantilla_html):
 _CUERPO_INICIO = """
 <section class="p-hero"><div class="p-hero-in">
   <h1>Las facturas llegan o las sube usted. El Excel ya está hecho.</h1>
-  <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en el formato de miEos y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive. <strong>ContaSOL y Sage 50:</strong> disponibles en pruebas. <strong>a3, Glasof y otros:</strong> preparamos su formato al registrarse.</p>
+  <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en un Excel con el formato de su programa contable y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive. <strong>miEos:</strong> disponible. <strong>ContaSOL y Sage 50:</strong> en pruebas. <strong>a3, Glasof, Sage Despachos y otros:</strong> preparamos su formato al registrarse.</p>
   <div class="acciones-hero">
     {% if logueada %}<a class="btn principal" href="{{ url_for('panel.panel') }}">Ir al panel</a>
     {% else %}<a class="btn principal" href="{{ url_for('alta.registro') }}">Probar 14 días gratis</a>
