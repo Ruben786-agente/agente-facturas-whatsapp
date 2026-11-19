@@ -139,6 +139,7 @@ CABECERA = (
 PIE = (
     '<footer class="p-pie"><div class="p-pie-in">'
     '<span>&copy; {{ d.anio }} Agente Facturas</span>'
+    '<a href="{{ url_for(\'guias.indice\') }}">Guías</a>'
     '<a href="{{ url_for(\'publico.terminos\') }}">Condiciones del servicio</a>'
     '<a href="{{ url_for(\'publico.privacidad\') }}">Privacidad</a>'
     '<a href="{{ url_for(\'publico.encargo\') }}">Encargo del tratamiento</a>'
@@ -487,7 +488,8 @@ def robots():
 @bp_publico.route("/sitemap.xml")
 def sitemap():
     base = _datos()["url"]
-    rutas = ["/", "/terminos", "/privacidad", "/encargo"]
+    from guias_web import rutas_sitemap
+    rutas = ["/"] + rutas_sitemap() + ["/terminos", "/privacidad", "/encargo"]
     cuerpo = "".join(f"<url><loc>{base}{r}</loc></url>" for r in rutas)
     return Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                     + cuerpo + "</urlset>", mimetype="application/xml")
