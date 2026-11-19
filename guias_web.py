@@ -54,7 +54,7 @@ GUIAS = [
         "slug": "importar-facturas-contasol-sage-mieos",
         "titulo": "Importar facturas en ContaSOL, Sage 50 o miEos a partir de PDF",
         "seo": "Importar facturas PDF en ContaSOL, Sage 50 y miEos",
-        "desc": "Qué formatos de Excel genera el agente para importar facturas en miEos (disponible) y en ContaSOL y Sage 50 (en pruebas), y cómo pedir el de otro programa.",
+        "desc": "Qué formatos de Excel genera el agente para importar facturas en miEos (disponible) y en ContaSOL, Sage 50 y Holded (en pruebas), y cómo pedir el de otro programa.",
         "resumen": "Las facturas llegan en PDF, pero su programa contable quiere un fichero de importación. Así se cierra ese hueco sin teclear.",
         "secciones": [
             ("El hueco entre el PDF y el programa contable",
