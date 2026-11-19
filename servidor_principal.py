@@ -16,6 +16,7 @@ from webhook_whatsapp import bp_whatsapp
 from panel_web import bp_panel
 from actividad_web import bp_actividad
 from impuestos_web import bp_impuestos
+from guias_web import bp_guias
 from alta_web import bp_alta
 from tareas_web import bp_tareas
 from revision_web import bp_revision
@@ -44,6 +45,7 @@ app.register_blueprint(bp_archivos)
 app.register_blueprint(bp_clientes)
 app.register_blueprint(bp_actividad)
 app.register_blueprint(bp_impuestos)
+app.register_blueprint(bp_guias)
 
 
 @app.errorhandler(GestoriaNoExiste)
