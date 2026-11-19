@@ -196,7 +196,7 @@ def _json_ld_inicio(plantilla_html):
 _CUERPO_INICIO = """
 <section class="p-hero"><div class="p-hero-in">
   <h1>Las facturas llegan o las sube usted. El Excel ya está hecho.</h1>
-  <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en un Excel con el formato de su programa contable y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive. <strong>miEos:</strong> disponible. <strong>ContaSOL, Sage 50 y Holded:</strong> en pruebas. <strong>a3, Glasof, Sage Despachos y otros:</strong> preparamos su formato al registrarse.</p>
+  <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en un Excel con el formato de su programa contable y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive. <strong>miEos:</strong> disponible. <strong>Holded</strong> (facturas recibidas): disponible. <strong>ContaSOL y Sage 50:</strong> en pruebas. <strong>a3, Glasof, Sage Despachos y otros:</strong> preparamos su formato al registrarse.</p>
   <div class="acciones-hero">
     {% if logueada %}<a class="btn principal" href="{{ url_for('panel.panel') }}">Ir al panel</a>
     {% else %}<a class="btn principal" href="{{ url_for('alta.registro') }}">Probar 14 días gratis</a>
@@ -218,7 +218,7 @@ _CUERPO_INICIO = """
   <h2>Lo que hace por usted</h2>
   <div class="rejilla">
     <div><h3>Lee facturas y tickets</h3><p>PDF e imágenes. Si un PDF trae varias facturas, las separa y las lee una a una.</p></div>
-    <div><h3>Excel para su programa contable</h3><p>Un archivo por cliente y mes (o trimestre), con el desglose de IVA, recargo y retención. miEos de serie; ContaSOL, Sage 50 y Holded en pruebas.</p></div>
+    <div><h3>Excel para su programa contable</h3><p>Un archivo por cliente y mes (o trimestre), con el desglose de IVA, recargo y retención. miEos y Holded (facturas recibidas) de serie; ContaSOL y Sage 50 en pruebas.</p></div>
     <div><h3>Carpetas en orden</h3><p>Crea sola la carpeta de cada empresa a partir del destinatario y su CIF, y aparta los tickets.</p></div>
     <div><h3>Lo dudoso, aparte</h3><p>Lo que no está claro va a una carpeta de Revisión con el motivo en el nombre. Los duplicados quedan señalados.</p></div>
     <div><h3>Corrección en un clic</h3><p>Desde el panel corrige una factura dudosa y se añade al Excel en el momento.</p></div>
@@ -236,7 +236,7 @@ _CUERPO_INICIO = """
     <div><h3>Cuida los CIF</h3><p>Valida el d&iacute;gito de control, corrige con lo que ya conoce y le avisa de proveedores que parecen repetidos o de un CIF mal le&iacute;do.</p></div>
     <div><h3>No adivina: lo dudoso, a revisi&oacute;n</h3><p>Lo que no est&aacute; claro va aparte, con el motivo, y lo corrige en un clic. Si quita algo de la lista, puede restaurarlo durante 30 d&iacute;as.</p></div>
     <div><h3>Avisos a su medida</h3><p>Resumen diario por correo, solo si hay algo pendiente, y con interruptor para apagarlo. Si no hay nada, no le escribimos.</p></div>
-    <div><h3>Excel para su programa</h3><p>miEos de serie, y ContaSOL, Sage 50 y Holded en pruebas. Con otros programas, preparamos su formato a partir de un fichero de ejemplo.</p></div>
+    <div><h3>Excel para su programa</h3><p>miEos y Holded (facturas recibidas) de serie, y ContaSOL y Sage 50 en pruebas. Con otros programas, preparamos su formato a partir de un fichero de ejemplo.</p></div>
     <div><h3>Cuatro entradas</h3><p>Correo (Gmail u Outlook), carpeta de OneDrive o Google Drive, y subida directa desde el panel.</p></div>
     <div><h3>14 d&iacute;as gratis, sin tarjeta</h3><p>Pru&eacute;belo con sus propias facturas antes de decidir.</p></div>
   </div>
@@ -244,7 +244,7 @@ _CUERPO_INICIO = """
 
 <section class="p-sec">
   <h2>Programas contables</h2>
-  <p class="intro">El Excel sale en el formato de miEos, y en ContaSOL, Sage 50 y Holded (estos tres en pruebas), listo para importar. &iquest;Usa otro programa? D&iacute;galo al registrarse y preparamos su formato: le pediremos un fichero de ejemplo con datos ficticios. Priorizamos los que m&aacute;s nos pidan.</p>
+  <p class="intro">El Excel sale en el formato de miEos, y en Holded (facturas recibidas) y, en pruebas, ContaSOL y Sage 50, listo para importar. &iquest;Usa otro programa? D&iacute;galo al registrarse y preparamos su formato: le pediremos un fichero de ejemplo con datos ficticios. Priorizamos los que m&aacute;s nos pidan.</p>
   <div class="progs">
     <span class="prog ok">miEos &middot; disponible</span>
     <span class="prog">Sage 50 &middot; en pruebas</span>
@@ -290,7 +290,7 @@ _CUERPO_INICIO = """
   <h2>Preguntas frecuentes</h2>
   <details><summary>¿Qué necesito para empezar?</summary><p>Una cuenta de correo (Gmail u Outlook / Microsoft 365) y un almacenamiento (OneDrive o Google Drive). Si su Microsoft 365 es de empresa, puede que un administrador tenga que aprobar el permiso una sola vez; le damos un enlace para enviárselo.</p></details>
   <details><summary>¿Y si la IA se equivoca?</summary><p>Lo que no está claro no se anota en el Excel: va a Revisión con el motivo, y usted lo corrige o lo da por revisado desde el panel. El agente es una ayuda y no sustituye su revisión profesional: usted siempre tiene la última palabra.</p></details>
-  <details><summary>¿Con qué programas contables funciona?</summary><p>Genera el Excel en formato miEos, y también en ContaSOL, Sage 50 y Holded (en pruebas). Preparamos Sage Despachos, Glasof y a3 a petición: dígalo al registrarse y le pediremos un fichero de ejemplo con datos ficticios. Si usa otro programa, cuéntenoslo y lo valoramos. No anunciamos un programa como disponible hasta haberlo probado.</p></details>
+  <details><summary>¿Con qué programas contables funciona?</summary><p>Genera el Excel en formato miEos, y también en Holded (facturas recibidas) y, en pruebas, en ContaSOL y Sage 50. Preparamos Sage Despachos, Glasof y a3 a petición: dígalo al registrarse y le pediremos un fichero de ejemplo con datos ficticios. Si usa otro programa, cuéntenoslo y lo valoramos. No anunciamos un programa como disponible hasta haberlo probado.</p></details>
   <details><summary>¿Qué documentos lee?</summary><p>Facturas y tickets que lleguen como adjunto al correo, en PDF o imagen. Si el destinatario no se reconoce o falta el CIF, el documento se aparta para que usted lo identifique.</p></details>
   <details><summary>¿Dónde se guardan mis archivos?</summary><p>En su OneDrive o Google Drive, no en nuestros servidores. Nosotros solo guardamos los datos necesarios para que el panel funcione: qué facturas se han leído y su estado.</p></details>
   <details><summary>¿Puedo cancelar cuando quiera?</summary><p>Sí. No hay permanencia. Y si lo desea, puede borrar su cuenta y todos sus datos desde el propio panel.</p></details>
@@ -299,7 +299,7 @@ _CUERPO_INICIO = """
 
 PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su programa contable", CABECERA + _CUERPO_INICIO + PIE, barra=False, extra_head=_meta(
     "Agente Facturas para gestorías: las facturas de sus clientes, directas al Excel de su programa contable",
-    "El agente lee las facturas del correo de su gestoría y las deja en Excel para su programa contable (miEos; ContaSOL, Sage 50 y Holded en pruebas; a3, Glasof y otros a petición). 14 días gratis.",
+    "El agente lee las facturas del correo de su gestoría y las deja en Excel para su programa contable (miEos y Holded; ContaSOL y Sage 50 en pruebas; a3, Glasof y otros a petición). 14 días gratis.",
     "/", json_ld=_json_ld_inicio(_CUERPO_INICIO)))
 
 
