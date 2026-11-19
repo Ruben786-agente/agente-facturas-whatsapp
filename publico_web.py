@@ -19,7 +19,7 @@ Mientras falte alguno, el texto muestra [PENDIENTE] para que no se publique por 
 import os
 from datetime import date
 
-from flask import Blueprint, Response, abort, render_template_string, session, url_for
+from flask import Blueprint, Response, abort, render_template_string, request, session, url_for
 
 from estilo_web import LOGO, pagina
 
@@ -147,22 +147,52 @@ PIE = (
 )
 
 
-def _meta(titulo_seo, descripcion, ruta):
+def _meta(titulo_seo, descripcion, ruta, json_ld=""):
     return (
         CSS_PUBLICO
         + f'<meta name="description" content="{descripcion}">'
         + '<link rel="canonical" href="{{ d.url }}' + ruta + '">'
         + f'<meta property="og:title" content="{titulo_seo}"><meta property="og:description" content="{descripcion}">'
         + '<meta property="og:type" content="website"><meta property="og:locale" content="es_ES">'
+        + '<meta property="og:site_name" content="Agente Facturas">'
         + '<meta property="og:url" content="{{ d.url }}' + ruta + '">'
+        + f'<meta name="twitter:card" content="summary"><meta name="twitter:title" content="{titulo_seo}">'
+        + f'<meta name="twitter:description" content="{descripcion}">'
+        + json_ld
     )
+
+
+def _faq_json_ld(plantilla_html):
+    """Preguntas frecuentes en datos estructurados, sacadas del propio texto visible de la página."""
+    import json, re
+    from html import unescape
+    pares = re.findall(r"<details><summary>(.*?)</summary><p>(.*?)</p></details>", plantilla_html, flags=re.S)
+    limpio = lambda t: unescape(re.sub(r"<[^>]+>", "", t)).strip()
+    return {"@type": "FAQPage", "mainEntity": [
+        {"@type": "Question", "name": limpio(q),
+         "acceptedAnswer": {"@type": "Answer", "text": limpio(a)}} for q, a in pares if "{{" not in a]}
+
+
+def _json_ld_inicio(plantilla_html):
+    import json
+    grafo = {"@context": "https://schema.org", "@graph": [
+        {"@type": "Organization", "@id": "{URL}/#org", "name": "Agente Facturas", "url": "{URL}/"},
+        {"@type": "SoftwareApplication", "name": "Agente Facturas", "url": "{URL}/",
+         "applicationCategory": "BusinessApplication", "operatingSystem": "Web",
+         "inLanguage": "es-ES",
+         "description": "Software para gestorías que lee las facturas del correo con inteligencia artificial y las deja en Excel para el programa contable (miEos, ContaSOL, Sage 50).",
+         "audience": {"@type": "Audience", "audienceType": "Gestorías y asesorías fiscales"},
+         "publisher": {"@id": "{URL}/#org"}},
+        _faq_json_ld(plantilla_html)]}
+    texto = json.dumps(grafo, ensure_ascii=False).replace("{URL}", "{{ d.url }}")
+    return '<script type="application/ld+json">' + texto + "</script>"
 
 
 # ---------------------------------------------------------------------------
 # Inicio
 # ---------------------------------------------------------------------------
 
-PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su programa contable", CABECERA + """
+_CUERPO_INICIO = """
 <section class="p-hero"><div class="p-hero-in">
   <h1>Las facturas llegan o las sube usted. El Excel ya está hecho.</h1>
   <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en el formato de miEos y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive. <strong>ContaSOL y Sage 50:</strong> disponibles en pruebas. <strong>a3, Glasof y otros:</strong> preparamos su formato al registrarse.</p>
@@ -264,10 +294,12 @@ PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su
   <details><summary>¿Dónde se guardan mis archivos?</summary><p>En su OneDrive o Google Drive, no en nuestros servidores. Nosotros solo guardamos los datos necesarios para que el panel funcione: qué facturas se han leído y su estado.</p></details>
   <details><summary>¿Puedo cancelar cuando quiera?</summary><p>Sí. No hay permanencia. Y si lo desea, puede borrar su cuenta y todos sus datos desde el propio panel.</p></details>
 </section>
-""" + PIE, barra=False, extra_head=_meta(
+"""
+
+PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su programa contable", CABECERA + _CUERPO_INICIO + PIE, barra=False, extra_head=_meta(
     "Agente Facturas para gestorías: las facturas de sus clientes, directas al Excel de su programa contable",
     "El agente lee las facturas del correo de su gestoría y las deja en Excel para su programa contable (miEos; ContaSOL y Sage 50 en pruebas; a3, Glasof y otros a petición). 14 días gratis.",
-    "/"))
+    "/", json_ld=_json_ld_inicio(_CUERPO_INICIO)))
 
 
 @bp_publico.route("/")
@@ -431,6 +463,18 @@ def encargo():
 # Para buscadores
 # ---------------------------------------------------------------------------
 
+_NO_INDEXAR = ("/login", "/registro", "/panel", "/conexiones", "/revision", "/abrir", "/sin-identificar",
+               "/onboarding", "/tareas", "/impuestos", "/actividad", "/subir", "/admin")
+
+
+@bp_publico.after_app_request
+def _no_indexar(resp):
+    """Las pantallas de acceso y del panel no deben aparecer en Google (compiten con la portada)."""
+    if request.path.startswith(_NO_INDEXAR):
+        resp.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return resp
+
+
 @bp_publico.route("/robots.txt")
 def robots():
     base = _datos()["url"]
@@ -443,7 +487,7 @@ def robots():
 @bp_publico.route("/sitemap.xml")
 def sitemap():
     base = _datos()["url"]
-    rutas = ["/", "/registro", "/login", "/terminos", "/privacidad", "/encargo"]
+    rutas = ["/", "/terminos", "/privacidad", "/encargo"]
     cuerpo = "".join(f"<url><loc>{base}{r}</loc></url>" for r in rutas)
     return Response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                     + cuerpo + "</urlset>", mimetype="application/xml")
