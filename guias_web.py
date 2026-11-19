@@ -45,7 +45,7 @@ GUIAS = [
         ],
         "faq": [
             ("¿Tengo que cambiar la forma en que mis clientes envían las facturas?",
-             "No. Siguen enviándolas al correo habitual de la gestoría, en PDF o foto. Usted también puede subir archivos directamente al panel."),
+             "No. Siguen enviándolas al correo habitual de la gestoría, en PDF o foto. Usted también puede subir archivos directamente al panel y el agente las leerá y ordenará por cliente."),
             ("¿Qué pasa con las facturas que la IA no entiende?",
              "No se anotan en el Excel: van a una carpeta de Revisión con el motivo, para que las corrija o las dé por revisadas desde el panel."),
         ],
