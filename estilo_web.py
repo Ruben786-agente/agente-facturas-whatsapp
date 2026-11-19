@@ -37,14 +37,16 @@ CSS = """
 
   /* Barra superior */
   .barra { background: var(--superficie); border-bottom: 1px solid var(--linea); }
-  .barra-in { max-width: 1120px; margin: 0 auto; padding: 0 24px; height: 62px; display: flex; align-items: center; gap: 28px; }
-  .marca { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--tinta); font: 600 21px/1 var(--serif); letter-spacing: -.01em; }
+  .barra-in { max-width: 1280px; margin: 0 auto; padding: 0 24px; height: 62px; display: flex; align-items: center; gap: 20px; }
+  .marca { display: flex; align-items: center; gap: 10px; white-space: nowrap; flex-shrink: 0; text-decoration: none; color: var(--tinta); font: 600 21px/1 var(--serif); letter-spacing: -.01em; }
   .marca:hover { color: var(--tinta); }
-  .barra nav { display: flex; gap: 4px; margin-left: 8px; }
-  .barra nav a { text-decoration: none; color: var(--tinta-2); padding: 7px 12px; border-radius: 6px; font-weight: 500; }
+  .barra nav { display: flex; flex-wrap: nowrap; gap: 2px; margin-left: 4px; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: none; }
+  .barra nav::-webkit-scrollbar { display: none; }
+  .barra nav a { text-decoration: none; color: var(--tinta-2); padding: 7px 10px; border-radius: 6px; font-weight: 500; font-size: 15px; white-space: nowrap; }
+  .barra nav a small { font-size: 10.5px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--tinta-2); background: var(--papel); border: 1px solid var(--linea); border-radius: 999px; padding: 1px 7px; margin-left: 5px; vertical-align: 1px; }
   .barra nav a:hover { background: var(--papel); color: var(--tinta); }
   .barra nav a.activa { color: var(--marca); background: var(--marca-clara); }
-  .barra .usuario { margin-left: auto; display: flex; align-items: center; gap: 16px; color: var(--tinta-2); font-size: 14px; }
+  .barra .usuario { margin-left: auto; display: flex; align-items: center; gap: 16px; color: var(--tinta-2); font-size: 14px; white-space: nowrap; flex-shrink: 0; padding-left: 16px; }
   .barra .usuario a { color: var(--tinta-2); }
 
   /* Estructura */
@@ -104,6 +106,7 @@ CSS = """
   input:focus, select:focus { outline: 2px solid var(--marca); outline-offset: 0; border-color: var(--marca); }
   select { width: auto; padding: 7px 30px 7px 10px; }
 
+  @media (max-width: 1340px) { .barra .usuario .nombre { display: none; } }
   @media (max-width: 720px) {
     .barra-in { padding: 10px 16px 6px; gap: 6px 12px; height: auto; flex-wrap: wrap; }
     .barra nav { order: 3; flex-basis: 100%; margin: 0 -12px; overflow-x: auto; }
@@ -145,9 +148,9 @@ BARRA = (
     '<a href="{{ url_for(\'subida.subir\') }}" {% if activa == \'subir\' %}class="activa" aria-current="page"{% endif %}>Subir facturas</a>'
     '<a href="{{ url_for(\'archivos.inicio\') }}" {% if activa == \'archivos\' %}class="activa" aria-current="page"{% endif %}>Archivos</a>'
     '<a href="{{ url_for(\'clientes.lista\') }}" {% if activa == \'clientes\' %}class="activa" aria-current="page"{% endif %}>Clientes</a>'
-    '<a href="{{ url_for(\'impuestos.borrador\') }}" {% if activa == \'impuestos\' %}class="activa" aria-current="page"{% endif %}>Impuestos <small>(en pruebas)</small></a>'
+    '<a href="{{ url_for(\'impuestos.borrador\') }}" {% if activa == \'impuestos\' %}class="activa" aria-current="page"{% endif %}>Impuestos <small>pruebas</small></a>'
     '<a href="{{ url_for(\'actividad.lista\') }}" {% if activa == \'actividad\' %}class="activa" aria-current="page"{% endif %}>Actividad</a>'
-    '<a href="{{ url_for(\'alta.conexiones\') }}" {% if activa == \'conexiones\' %}class="activa" aria-current="page"{% endif %}>Conexiones y suscripción</a>'
+    '<a href="{{ url_for(\'alta.conexiones\') }}" {% if activa == \'conexiones\' %}class="activa" aria-current="page"{% endif %}>Conexiones</a>'
     '</nav>'
     '<div class="usuario"><span class="nombre">{{ gestoria_nombre or "" }}</span>'
     '<a href="{{ url_for(\'panel.logout\') }}">Cerrar sesión</a></div>'
