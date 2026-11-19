@@ -1558,13 +1558,34 @@ def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
             return sorted(e.nombre for e in session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, activa=True)
                           if e.cif_nif not in con_facturas)
 
+        def _sin_envio(del_periodo):
+            """Clientes sin facturas en el periodo, con los días desde que llegó su último documento (fecha de llegada al sistema)."""
+            con_facturas = {g["cif"] for g in del_periodo}
+            ahora = datetime.now(timezone.utc)
+            ultimas = {}
+            for emp_id, ultima in (session.query(FacturaCache.empresa_cliente_id, func.max(FacturaCache.procesada_en))
+                                   .filter(FacturaCache.tenant_id == tenant_id).group_by(FacturaCache.empresa_cliente_id)):
+                ultimas[emp_id] = ultima
+            salida = []
+            for e in session.query(EmpresaCliente).filter_by(tenant_id=tenant_id, activa=True):
+                if e.cif_nif in con_facturas:
+                    continue
+                u = ultimas.get(e.id)
+                if u is not None and u.tzinfo is None:
+                    u = u.replace(tzinfo=timezone.utc)
+                salida.append({"nombre": e.nombre, "cif": e.cif_nif, "dias": (ahora - u).days if u else None})
+            salida.sort(key=lambda x: (x["dias"] is None, -(x["dias"] or 0), x["nombre"]))
+            return salida
+
         plazo = cierre = None
+        sin_envio = []
         if mensual:
             clave_foco = f"{foco[0]}-{foco[1]:02d}"
             del_mes = [g for g in todos if g["clave"] == clave_foco]
             cierre = {"etiqueta": f"{MESES[foco[1] - 1]} {foco[0]}", "clientes": len(del_mes),
                       "con_revision": sum(1 for g in del_mes if g["revision"]),
                       "sin_facturas": _sin_facturas(del_mes)}
+            sin_envio = _sin_envio(del_mes)
         else:
             plazo = _trimestre_en_plazo(hoy_d)
             if plazo:
@@ -1572,12 +1593,13 @@ def obtener_resumen_panel(tenant_id, trimestre=None, hoy_fecha=None):
                 plazo["clientes"] = len(del_trim)
                 plazo["con_revision"] = sum(1 for g in del_trim if g["revision"])
                 plazo["sin_facturas"] = _sin_facturas(del_trim)
+                sin_envio = _sin_envio(del_trim)
         minutos = docs_mes * MINUTOS_POR_DOCUMENTO
         ahorro = {"documentos": docs_mes, "minutos_por_doc": MINUTOS_POR_DOCUMENTO,
                   "horas": minutos // 60, "minutos": minutos % 60}
         return {"resumen": resumen, "clientes": clientes, "atencion": atencion[:100],
                 "periodos": periodos, "periodo_activo": trimestre or (clientes[0]["clave"] if mensual and clientes else ""),
-                "periodicidad": periodicidad, "plazo": plazo, "cierre": cierre, "ahorro": ahorro}
+                "periodicidad": periodicidad, "plazo": plazo, "cierre": cierre, "ahorro": ahorro, "sin_envio": sin_envio}
     finally:
         session.close()
 

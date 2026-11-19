@@ -253,7 +253,19 @@ PLANTILLA_PANEL = pagina("Panel", """
       </tr>
       {% endfor %}
     </table></div>
-    {% else %}
+    {% endif %}
+    {% if sin_envio and clientes %}
+    <div class="tabla" style="margin-top:22px;"><table class="apilable">
+      <tr><th>Clientes que aún no han mandado nada este periodo</th><th class="num">Último envío</th></tr>
+      {% for c in sin_envio %}
+      <tr>
+        <td data-label="Cliente">{{ c.nombre }}<span class="sec">{{ c.cif }}</span></td>
+        <td data-label="Último envío" class="num">{% if c.dias is none %}nunca ha mandado{% elif c.dias == 0 %}hoy{% elif c.dias == 1 %}hace 1 día{% else %}hace {{ c.dias }} días{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table></div>
+    {% endif %}
+    {% if not clientes %}
     <div class="vacio"><strong>Todavía no hay facturas procesadas.</strong>Cuando lleguen facturas a su correo, o las <a href="{{ url_for('subida.subir') }}">suba usted directamente</a>, verá aquí cada cliente con su Excel.</div>
     {% endif %}
   </section>
@@ -305,7 +317,7 @@ def panel():
     return render_template_string(
         PLANTILLA_PANEL, resumen=datos["resumen"], atencion=datos["atencion"], clientes=datos["clientes"],
         periodos=datos["periodos"], periodo_activo=datos["periodo_activo"], periodicidad=datos["periodicidad"],
-        plazo=datos["plazo"], cierre=datos["cierre"], ahorro=datos["ahorro"], filtro=filtro, aviso=aviso,
+        plazo=datos["plazo"], cierre=datos["cierre"], ahorro=datos["ahorro"], sin_envio=datos["sin_envio"] if not filtro else [], filtro=filtro, aviso=aviso,
         mensajes=get_flashed_messages(), gestoria_nombre=e["nombre"], descartadas=obtener_descartadas(session["tenant_id"]),
         avisos=[a for a in todos_avisos if a["tipo"] not in TIPOS_AVISO_INFORMATIVO],
         avisos_info=[a for a in todos_avisos if a["tipo"] in TIPOS_AVISO_INFORMATIVO])
