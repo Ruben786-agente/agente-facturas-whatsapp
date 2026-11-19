@@ -43,6 +43,14 @@ PLANTILLA_LOGIN = acceso("Entrar", """
 
 CSS_PANEL = """
 <style>
+  /* Tabla de clientes: filas centradas y botones del Excel en una sola línea, todos del mismo tamaño */
+  .tabla-clientes td { vertical-align: middle; }
+  .tabla-clientes th, .tabla-clientes td { padding-left: 10px; padding-right: 10px; }
+  .tabla-clientes th:first-child, .tabla-clientes td:first-child { padding-left: 18px; min-width: 170px; }
+  .tabla-clientes .acciones .btn { padding: 6px 11px; font-size: 13.5px; }
+  .tabla-clientes .acciones { flex-wrap: nowrap; }
+  .tabla-clientes .acciones .btn { white-space: nowrap; }
+  @media (max-width: 720px) { .tabla-clientes .acciones { flex-wrap: wrap; } }
   /* Plazo del modelo 303: lo primero que se ve */
   .cierre { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 40px; align-items: end; padding: 8px 0 8px; }
   .cierre h1 { font-size: clamp(32px, 4.4vw, 50px); line-height: 1.08; }
@@ -234,7 +242,7 @@ PLANTILLA_PANEL = pagina("Panel", """
     </script>
     {% if clientes and periodo_activo %}<p style="margin:0 0 12px;"><a class="btn discreto" href="{{ url_for('revision.descargar_excels', clave=periodo_activo) }}">Descargar todos los Excel de este periodo (ZIP)</a></p>{% endif %}
     {% if clientes %}
-    <div class="tabla"><table class="apilable">
+    <div class="tabla"><table class="apilable tabla-clientes">
       <tr><th>Cliente</th>{% if periodicidad != "mensual" %}<th>Trimestre</th>{% endif %}<th class="num">Facturas</th><th class="num">Total</th><th class="num">Tickets</th><th class="num">En revisión</th><th>Estado</th><th>Excel</th></tr>
       {% for c in clientes %}
       <tr>
@@ -248,8 +256,8 @@ PLANTILLA_PANEL = pagina("Panel", """
         <td data-label="En revisión" class="num">{{ c.revision }}</td>
         <td data-label="Estado"><span class="estado {{ c.estado }}">{{ {"LISTO": "Listo para importar", "REVISAR": "Tiene pendientes", "SIN_FACTURAS": "Sin facturas"}[c.estado] }}</span></td>
         <td data-label="Excel">{% if c.facturas %}<div class="acciones"><a class="btn principal" href="{{ url_for('revision.descargar_excel', cif=c.cif, periodo=c.periodo) }}">Descargar Excel</a>
-          <a class="btn discreto" href="{{ url_for('revision.abrir_excel', cif=c.cif, periodo=c.periodo) }}" target="_blank" rel="noopener">Abrir en su carpeta</a>
-          <a class="btn discreto" href="{{ url_for('revision.informe_comprobacion', cif=c.cif, clave=c.clave) }}">Informe de comprobación</a></div>{% else %}<span class="sec">-</span>{% endif %}</td>
+          <a class="btn" href="{{ url_for('revision.abrir_excel', cif=c.cif, periodo=c.periodo) }}" target="_blank" rel="noopener">Abrir carpeta</a>
+          <a class="btn" href="{{ url_for('revision.informe_comprobacion', cif=c.cif, clave=c.clave) }}">Informe</a></div>{% else %}<span class="sec">-</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </table></div>
