@@ -29,7 +29,7 @@ PROGRAMAS = [("mieos", "miEOS"), ("sage", "Sage Despachos / otro Sage"), ("sage5
              ("glasof", "Glasof"), ("holded", "Holded"), ("otro", "Otro")]
 PROGRAMA_LISTO = "mieos"
 # Programas con exportador (miEOS de serie; ContaSOL y Sage 50 se generan a partir del Excel de miEOS, ver exportadores.py)
-PROGRAMAS_LISTOS = ("mieos", "contasol", "sage50")
+PROGRAMAS_LISTOS = ("mieos", "contasol", "sage50", "holded")
 
 
 class Gestoria(Base):

@@ -5,6 +5,7 @@ La fuente única sigue siendo el Excel de miEOS: así el agente no cambia, solo 
 
   ContaSOL (formato oficial «Importación Excel/Calc» de Software DELSOL): MAE (cuentas), APU (asientos), IVS e IVR (libros de IVA), en .xls.
   Sage 50 (importador oficial de facturas, Excel): un libro de facturas recibidas y otro de emitidas.
+  Holded (plantilla oficial «Importar compras», Excel): solo facturas recibidas; las emitidas usan otra plantilla de Holded (pendiente).
 
 Cuentas: no se conoce el plan contable de la gestoría, así que cada proveedor/cliente recibe una subcuenta ESTABLE derivada de su CIF
 (400/430 + dígitos del CIF), igual en todos los meses. Las ventas sin NIF (alumnos, particulares) van a la subcuenta genérica de clientes.
@@ -15,7 +16,7 @@ from io import BytesIO
 
 from openpyxl import Workbook, load_workbook
 
-PROGRAMAS_EXPORTABLES = {"contasol": "ContaSOL", "sage50": "Sage 50"}
+PROGRAMAS_EXPORTABLES = {"contasol": "ContaSOL", "sage50": "Sage 50", "holded": "Holded"}
 
 # Cuentas del PGC (prefijos). Se rellenan con ceros hasta los dígitos de la empresa.
 CTA_GASTO, CTA_VENTA = "600", "700"
@@ -240,12 +241,64 @@ Primera vez: pruebe con un solo cliente. No importe dos veces el mismo fichero.
 """
 
 
+# ---------------------------------------------------------------- Holded
+CABECERA_HOLDED = ["Num factura", "Fecha dd/mm/yyyy", "Fecha de vencimiento dd/mm/yyyy", "Fecha deducción dd/mm/yyyy", "Descripción",
+                   "Nombre del contacto", "NIF", "Dirección", "Población", "Código postal", "Provincia", "País", "Concepto",
+                   "Descripción del producto", "SKU", "Precio unidad", "Unidades", "Descuento %", "IVA %", "Retención %",
+                   "Inv. Suj. Pasivo (1/0)", "Operación", "Cantidad cobrada", "Fecha de cobro", "Cuenta de pago",
+                   "Tags separados por -", "Nombre cuenta de gasto", "Num. Cuenta de gasto", "Moneda", "Cambio de moneda", "Almacén"]
+
+
+def a_holded(contenido_xlsx):
+    """Plantilla «Importar compras» de Holded: una fila por factura y tipo de IVA, mismas cabeceras que la muestra oficial.
+    Solo compras. La factura queda pendiente de pago (sin «Cantidad cobrada»)."""
+    fs = [f for f in leer_facturas(contenido_xlsx) if f["tipo"] == "COMPRAS"]
+    if not fs:
+        return []
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Holded"
+    ws.append(CABECERA_HOLDED)
+    for fa in sorted(fs, key=lambda x: (_fecha(x["fecha"]), x["num"])):
+        fecha = _fecha(fa["fecha"]).strftime("%d/%m/%Y")
+        for ds in fa["desgloses"]:
+            fila = [None] * len(CABECERA_HOLDED)
+            fila[0] = fa["num"]
+            fila[1] = fila[2] = fecha
+            fila[5] = fa["nombre"] or fa["cif"]
+            fila[6] = fa["cif"]
+            fila[12] = "Factura " + fa["num"]
+            fila[15] = _r(ds["base"])
+            fila[16] = 1
+            fila[17] = 0
+            fila[18] = ds["pct"]
+            fila[19] = fa["ret_pct"] or 0
+            fila[20] = 0
+            fila[21] = "general"
+            fila[28] = "eur"
+            ws.append(fila)
+    b = BytesIO()
+    wb.save(b)
+    return [("holded_compras.xlsx", b.getvalue())]
+
+
+LEEME_HOLDED = """IMPORTAR EN HOLDED (plantilla oficial «Importar compras»)  -  FORMATO EN PRUEBAS
+Compras > Facturas > Importar compras > Subir archivo > holded_compras.xlsx.
+Hay una fila por factura y tipo de IVA; las facturas quedan pendientes de pago. No importe dos veces el mismo fichero.
+Solo facturas recibidas: las emitidas se importan con otra plantilla de Holded (aún no incluida).
+El recargo de equivalencia no tiene columna en esta plantilla: si hay facturas con recargo, revíselas a mano tras importar.
+Primera vez: pruebe con pocas facturas y compruebe importes y proveedores.
+"""
+
+
 def convertir(programa, contenido_xlsx):
     """(archivos, leeme) para el programa elegido, o None si ese programa se importa con el Excel de miEOS tal cual."""
     if programa == "contasol":
         return a_contasol(contenido_xlsx), LEEME_CONTASOL.format(d=DIGITOS["contasol"])
     if programa == "sage50":
         return a_sage50(contenido_xlsx), LEEME_SAGE50
+    if programa == "holded":
+        return a_holded(contenido_xlsx), LEEME_HOLDED
     return None
 
 
