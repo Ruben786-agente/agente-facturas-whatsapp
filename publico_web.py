@@ -97,6 +97,39 @@ CSS_PUBLICO = """
   .barra-cta span { color: var(--tinta); font-weight: 500; }
   .barra-cta .btn { white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) { .barra-cta { transition: none; } }
+  .demo-panel { max-width: 1120px; margin: -56px auto 0; padding: 0 24px; position: relative; z-index: 2; }
+  .demo-panel .marco { background: var(--superficie); border: 1px solid var(--linea); border-radius: 16px; box-shadow: 0 24px 60px rgba(20,40,50,.18); overflow: hidden; }
+  .demo-panel .marco-barra { display: flex; align-items: center; gap: 7px; padding: 12px 16px; background: var(--papel); border-bottom: 1px solid var(--linea); }
+  .demo-panel .punto { width: 10px; height: 10px; border-radius: 50%; background: var(--linea); }
+  .demo-panel .marco-barra small { margin-left: auto; color: var(--tinta-3); font-size: 12.5px; }
+  .demo-panel .cuerpo { padding: 26px 28px 8px; }
+  .demo-panel .cab { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; }
+  .demo-panel h2 { font-size: clamp(22px, 2.6vw, 30px); margin: 0; }
+  .demo-panel .cab p { color: var(--tinta-2); margin: 4px 0 0; font-size: 15px; }
+  .demo-panel .prog-d { min-width: 220px; flex: 0 1 280px; font-size: 13.5px; color: var(--tinta-2); }
+  .demo-panel .prog-d .pista { height: 6px; background: var(--linea); border-radius: 3px; overflow: hidden; margin-top: 7px; }
+  .demo-panel .prog-d .pista span { display: block; height: 100%; width: 66%; background: var(--marca); }
+  .demo-panel .cifras-d { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+  .demo-panel .cifras-d div { border: 1px solid var(--linea); border-radius: 10px; padding: 12px 14px; }
+  .demo-panel .cifras-d b { display: block; font: 600 26px/1.1 var(--serif); color: var(--tinta); }
+  .demo-panel .cifras-d span { color: var(--tinta-3); font-size: 13px; }
+  .demo-panel table { min-width: 0; margin-top: 18px; font-size: 14.5px; }
+  .demo-panel th { font-size: 12.5px; }
+  .demo-panel td, .demo-panel th { padding: 11px 10px; }
+  .demo-panel td { vertical-align: middle; }
+  .demo-panel .est { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .demo-panel .est::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #3F7D5C; }
+  .demo-panel .est.rev::before { background: #B7791F; }
+  .demo-panel .bt { display: inline-block; background: var(--marca); color: #fff; border-radius: 7px; padding: 5px 11px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+  .demo-panel .pie-d { color: var(--tinta-3); font-size: 13px; padding: 4px 28px 18px; }
+  .demo-panel .pc { text-align: right; font-variant-numeric: tabular-nums; }
+  @media (max-width: 800px) {
+    .demo-panel { padding: 0 14px; margin-top: -36px; }
+    .demo-panel .cuerpo { padding: 18px 16px 4px; }
+    .demo-panel .cifras-d { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .demo-panel .oculto-m { display: none; }
+    .demo-panel .pie-d { padding: 4px 16px 14px; }
+  }
   .p-sec { scroll-margin-top: 80px; }
   .p-sec { max-width: 1120px; margin: 0 auto; padding: 72px 24px 0; }
   .p-sec h2 { font-size: clamp(26px, 3.2vw, 36px); max-width: 22em; }
@@ -237,6 +270,29 @@ _CUERPO_INICIO = """
     <a class="btn sec" href="{{ url_for('panel.login') }}">Ya tengo cuenta</a>{% endif %}
   </div>
   <ul class="confianza-hero"><li>Sin tarjeta para empezar</li><li>Sus archivos siguen en su OneDrive o Google Drive</li><li>La última palabra es siempre suya</li></ul>
+</div></section>
+
+<section class="demo-panel" aria-label="Ejemplo del panel con datos ficticios"><div class="marco">
+  <div class="marco-barra"><i class="punto"></i><i class="punto"></i><i class="punto"></i><small>Ejemplo con datos ficticios</small></div>
+  <div class="cuerpo">
+    <div class="cab">
+      <div><h2>Cierre de noviembre</h2><p>Para tener el Excel del mes listo para importar.</p></div>
+      <div class="prog-d"><b style="color:var(--tinta);font-weight:600;">2 de 3</b> clientes sin nada pendiente<div class="pista"><span></span></div></div>
+    </div>
+    <div class="cifras-d">
+      <div><b>46</b><span>Facturas procesadas</span></div>
+      <div><b>9</b><span>Tickets archivados aparte</span></div>
+      <div><b>2</b><span>En revisión</span></div>
+      <div><b>3 h 50</b><span>Tiempo ahorrado este mes</span></div>
+    </div>
+    <table>
+      <tr><th>Cliente</th><th class="pc">Facturas</th><th class="pc oculto-m">Total</th><th class="pc oculto-m">En revisión</th><th>Estado</th><th class="oculto-m">Excel</th></tr>
+      <tr><td>Panadería Ejemplo S.L.</td><td class="pc">18</td><td class="pc oculto-m">6.240,30 &euro;</td><td class="pc oculto-m">0</td><td><span class="est">Listo para importar</span></td><td class="oculto-m"><span class="bt">Descargar Excel</span></td></tr>
+      <tr><td>Taller Demo S.L.</td><td class="pc">21</td><td class="pc oculto-m">11.870,00 &euro;</td><td class="pc oculto-m">0</td><td><span class="est">Listo para importar</span></td><td class="oculto-m"><span class="bt">Descargar Excel</span></td></tr>
+      <tr><td>Hostal Muestra S.L.</td><td class="pc">7</td><td class="pc oculto-m">2.915,45 &euro;</td><td class="pc oculto-m">2</td><td><span class="est rev">Tiene pendientes</span></td><td class="oculto-m"><span class="bt">Descargar Excel</span></td></tr>
+    </table>
+  </div>
+  <p class="pie-d">Lo dudoso queda aparte con el motivo, para que lo revise usted. Nombres y cifras de ejemplo.</p>
 </div></section>
 
 <section class="p-sec" id="como">
