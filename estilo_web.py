@@ -196,9 +196,11 @@ CSS_ACCESO = """
 PRESENTACION = (
     '<aside class="acceso-marca"><a class="marca" href="#">' + LOGO + 'Agente Facturas</a>'
     '<div><h1>Sus clientes envían las facturas. El Excel ya está hecho.</h1>'
-    '<p>El agente lee cada factura, la anota en el formato de miEos y la archiva en la carpeta de cada cliente en su OneDrive o Google Drive.</p></div>'
-    '<ul><li>Lee las facturas que llegan a su correo o WhatsApp</li><li>Un Excel por cliente y mes (o trimestre)</li>'
-    '<li>Lo dudoso queda aparte, para que lo revise usted</li></ul></aside>'
+    '<p>El agente lee cada factura, la anota en un Excel con el formato de su programa contable y la archiva en la carpeta de cada cliente, en su OneDrive o Google Drive.</p></div>'
+    '<ul><li>Lee las facturas que llegan a su correo o WhatsApp, o que sube usted al panel</li>'
+    '<li>Un Excel por cliente y mes (o trimestre): miEos, y ContaSOL, Sage 50 y Holded en pruebas</li>'
+    '<li>Avisa de duplicados y deja lo dudoso aparte, para que lo revise usted</li>'
+    '<li>Le muestra qué clientes aún no han mandado facturas</li></ul></aside>'
 )
 
 
