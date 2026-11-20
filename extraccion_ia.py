@@ -407,8 +407,32 @@ def _completar_cliente(contenido: bytes, resultado: dict) -> dict:
         return resultado
 
 
+def _completar_cif_emisor(contenido: bytes, r: dict) -> dict:
+    """Solo si una factura normal sale SIN CIF de emisor Y SIN CIF de comprador, y el PDF (con texto) contiene un único NIF/CIF válido,
+    ese es el del emisor. Si el documento tiene dos o más, o ninguno, no se toca nada (sigue a Revisión como siempre)."""
+    try:
+        if r.get("_lectura_fallida") or r.get("es_documento_fiscal") is False or r.get("es_factura_simplificada") or r.get("formato_ticket_tpv"):
+            return r
+        if ((r.get("emisor") or {}).get("cif_nif") or "").strip() or ((r.get("destinatario") or {}).get("cif_nif") or "").strip():
+            return r
+        if _detectar_media_type(contenido) != "application/pdf":
+            return r
+        import io, re
+        from pypdf import PdfReader
+        from validaciones import control_nif_cif_correcto
+        texto = " ".join((pg.extract_text() or "") for pg in PdfReader(io.BytesIO(contenido)).pages[:3])
+        candidatos = {m.upper() for m in re.findall(r"\b(?:[0-9]{8}[A-Za-z]|[XYZxyz][0-9]{7}[A-Za-z]|[ABCDEFGHJNPQRSUVWabcdefghjnpqrsuvw][0-9]{7}[0-9A-Ja-j])\b", texto)}
+        validos = [c for c in candidatos if control_nif_cif_correcto(c) is True]
+        if len(validos) == 1 and len(candidatos) == 1:
+            log.info("CIF del emisor completado desde el texto del PDF")
+            return {**r, "emisor": {**(r.get("emisor") or {}), "cif_nif": validos[0]}}
+    except Exception:
+        log.debug("No se pudo completar el CIF del emisor desde el PDF")
+    return r
+
+
 def extraer_factura(contenido: bytes) -> dict:
-    return _completar_cliente(contenido, _extraer_factura_con_refuerzo(contenido))
+    return _completar_cliente(contenido, _completar_cif_emisor(contenido, _extraer_factura_con_refuerzo(contenido)))
 
 
 def _extraer_factura_con_refuerzo(contenido: bytes) -> dict:
