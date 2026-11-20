@@ -29,7 +29,7 @@ from almacenamiento_tenant import storage_para_tenant
 from basededatos import (crear_aviso, guardar_carpetas_entrada, obtener_carpetas_entrada, olvidar_carpetas_entrada,
                          actualizar_subida, documento_ya_visto, subida_cancelada, proveedor_almacenamiento_activo, registrar_intento_fallido, tenants_con_almacenamiento)
 from onboarding import CARPETA_RAIZ
-from procesamiento import LECTURAS_PARALELAS, detectar_cliente_emisor, procesar_archivo
+from procesamiento import LECTURAS_PARALELAS, completar_emisor_del_lote, detectar_cliente_emisor, procesar_archivo
 from extraccion_ia import ServicioIANoDisponible, extraer_factura
 
 log = logging.getLogger("sondeo_entrada")
@@ -230,6 +230,7 @@ def procesar_entrada(storage, tenant_id, proveedor, max_archivos=None):
                 except Exception:
                     pass
         try:
+            completar_emisor_del_lote(leidas)
             detectar_cliente_emisor(storage, tenant_id, leidas)
         except Exception:
             log.exception("Entrada %s: no se pudo comprobar si el emisor del lote es un cliente", tenant_id)

@@ -584,6 +584,38 @@ def leer_por_adelantado(contenidos, extraer=None, al_terminar=None):
         return list(pool.map(una, contenidos))
 
 
+def completar_emisor_del_lote(facturas):
+    """En un lote, si varias facturas llevan el mismo emisor con CIF válido y otras tienen exactamente ese mismo nombre de emisor
+    pero la IA no leyó el CIF, se les pone el mismo CIF (es el mismo proveedor). Solo con el nombre idéntico (sin tildes ni mayúsculas),
+    con el CIF visto en al menos 2 facturas del lote y sin tocar tickets ni lecturas falladas. Modifica las lecturas en el sitio."""
+    from collections import Counter
+    from extraccion_ia import _norm_nombre
+    docs = [f for f in (facturas or []) if f and not f.get("_lectura_fallida") and f.get("es_documento_fiscal", True)
+            and not f.get("es_factura_simplificada") and not f.get("formato_ticket_tpv")]
+    cifs_por_nombre = {}
+    for f in docs:
+        e = f.get("emisor") or {}
+        cif, nombre = _normaliza_cif(e.get("cif_nif")), _norm_nombre(e.get("nombre"))
+        if cif and nombre and not comprobar_cif(cif)[1]:
+            cifs_por_nombre.setdefault(nombre, Counter())[cif] += 1
+    completadas = 0
+    for f in docs:
+        e = f.get("emisor") or {}
+        nombre = _norm_nombre(e.get("nombre"))
+        if _normaliza_cif(e.get("cif_nif")) or not nombre or nombre not in cifs_por_nombre:
+            continue
+        candidatos = cifs_por_nombre[nombre]
+        if len(candidatos) != 1:
+            continue                       # el mismo nombre con CIF distintos: no se adivina
+        cif, veces = next(iter(candidatos.items()))
+        if veces >= 2:
+            f["emisor"] = {**e, "cif_nif": cif}
+            completadas += 1
+    if completadas:
+        log.info("Lote: CIF del emisor completado en %d facturas (mismo nombre de emisor que otras del lote)", completadas)
+    return completadas
+
+
 def detectar_cliente_emisor(storage, tenant_id, facturas):
     """
     Un emisor que firma la mayoría de las facturas de un lote y se las manda a varios compradores distintos es el libro de ventas
@@ -703,6 +735,7 @@ def procesar_archivo(storage, tenant_id, contenido, nombre_original, extraer=Non
     leidas = leer_por_adelantado([None if v else p for v, p in zip(ya_vistas, partes)], extraer,
                                  (lambda h, t: progreso("leyendo", h, t)) if progreso else None)
     try:
+        completar_emisor_del_lote(leidas)
         detectar_cliente_emisor(storage, tenant_id, leidas)
     except Exception:
         log.exception("No se pudo comprobar si el emisor del lote es un cliente")
