@@ -52,6 +52,22 @@ CSS_SUBIDA = """
   .lista .aviso .progreso > i { background: #d9a400; }
   .lista .mal .progreso > i { background: var(--error); }
   .lista .aviso .estado { color: #8a6500; font-weight: 500; }
+  .lista li { padding: 14px 18px; border-radius: 12px; row-gap: 12px; box-shadow: 0 1px 2px rgba(20,40,50,.04); }
+  .lista .nombre { font-weight: 500; }
+  .lista .estado { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; padding: 4px 12px; border-radius: 999px; background: var(--marca-clara); color: var(--marca); font-weight: 500; }
+  .lista .estado::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+  .lista .curso .estado::before { animation: latido 1.2s ease-in-out infinite; }
+  .lista .ok .estado { background: #E4F2EA; }
+  .lista .aviso .estado { background: #FBF1D6; }
+  .lista .mal .estado { background: #F8E6E5; }
+  .progreso { height: 8px; border-radius: 999px; }
+  .progreso > i { border-radius: 999px; }
+  .lista .curso .progreso > i { background-image: linear-gradient(45deg, rgba(255,255,255,.22) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.22) 50%, rgba(255,255,255,.22) 75%, transparent 75%); background-size: 18px 18px; animation: rayas 1s linear infinite; }
+  .lista .quitar { text-decoration: none; border: 1px solid var(--linea-fuerte); border-radius: 999px; padding: 4px 14px; color: var(--tinta-2); }
+  .lista .quitar:hover { border-color: var(--marca); color: var(--marca); background: var(--marca-clara); }
+  @keyframes latido { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+  @keyframes rayas { from { background-position: 0 0; } to { background-position: 18px 0; } }
+  @media (prefers-reduced-motion: reduce) { .lista .curso .estado::before, .lista .curso .progreso > i { animation: none; } }
   .lista .quitar { flex: none; background: none; border: 0; color: var(--tinta-3); text-decoration: underline; cursor: pointer; font: inherit; font-size: 14px; padding: 0 4px; }
   .lista .quitar:hover { color: var(--marca); }
   .lista .detalle { flex-basis: 100%; font-size: 14px; color: var(--tinta-2); margin: 0; }
@@ -157,8 +173,8 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
 
     function fila(it) {
       var li = document.createElement('li'), n = document.createElement('span'), s = document.createElement('span'), b = document.createElement('div');
-      li.className = it.clase === 'ok' ? 'ok' : it.clase === 'aviso' ? 'aviso' : it.clase === 'error' ? 'mal' : '';
-      n.className = 'nombre'; n.textContent = it.nombre; s.className = 'estado'; s.textContent = it.texto;
+      li.className = it.clase === 'ok' ? 'ok' : it.clase === 'aviso' ? 'aviso' : it.clase === 'error' ? 'mal' : 'curso';
+      n.className = 'nombre'; n.textContent = it.nombre; s.className = 'estado'; s.textContent = it.texto; if (it.clase === 'curso' && it.pct) { s.textContent = it.texto + ' · ' + Math.round(it.pct) + '%'; }
       b.className = 'progreso'; var i = document.createElement('i'); i.style.width = (it.pct || 0) + '%'; b.appendChild(i);
       li.appendChild(n); li.appendChild(s);
       if (it.clase === 'curso' && it.id && it.texto.indexOf('Cancelando') !== 0) {
