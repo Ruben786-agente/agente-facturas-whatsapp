@@ -503,15 +503,12 @@ def eliminar_gestoria(tenant_id):
 
 
 def borrar_lo_leido(tenant_id):
-    """Vacía lo que el agente ha leído y guardado (facturas, clientes dados de alta, avisos, revisión, proveedores recordados) y deja la cuenta,
-    las conexiones y la carpeta de entrada como están. No toca ningún archivo de OneDrive/Drive."""
+    """Vacía lo que el agente ha leído y guardado (facturas, avisos, revisión, sin identificar, proveedores recordados) y deja como están la cuenta,
+    las conexiones, la carpeta de entrada y los CLIENTES dados de alta. No toca ningún archivo de OneDrive/Drive."""
     session = _obtener_session()
     try:
-        ids_empresas = [e.id for e in session.query(EmpresaCliente.id).filter_by(tenant_id=tenant_id)]
-        if ids_empresas:
-            session.query(EstadoSondeo).filter(EstadoSondeo.empresa_cliente_id.in_(ids_empresas)).delete(synchronize_session=False)
         for modelo in (FacturaCache, CorreoProcesado, CorreoIntento, DocumentoVisto, DocumentoSinIdentificar, Aviso,
-                       NotificacionEnviada, ProveedorAprendido, SubidaEstado, EmpresaCliente):
+                       NotificacionEnviada, ProveedorAprendido, SubidaEstado):
             session.query(modelo).filter_by(tenant_id=tenant_id).delete(synchronize_session=False)
         session.commit()
     finally:

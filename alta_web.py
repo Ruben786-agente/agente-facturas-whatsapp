@@ -251,7 +251,7 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
   <details style="margin-top:36px;max-width:640px;">
     <summary class="tenue" style="cursor:pointer;">Borrar lo leído y empezar de cero</summary>
     <form method="post" action="{{ url_for('alta.borrar_leido') }}" style="margin-top:14px;">
-      <p class="tenue">Se borran las facturas leídas, los clientes dados de alta, los avisos y lo pendiente de revisar. <strong>Se mantienen su cuenta, sus conexiones y su carpeta de entrada.</strong> No se tocan sus archivos de OneDrive o Google Drive: si ya hay un Excel o carpetas de clientes allí, bórrelos usted antes de volver a subir las facturas, o se anotarán dos veces. No se puede deshacer.</p>
+      <p class="tenue">Se borran las facturas leídas, los avisos y lo pendiente de revisar. <strong>Se mantienen su cuenta, sus conexiones, su carpeta de entrada y sus clientes dados de alta.</strong> No se tocan sus archivos de OneDrive o Google Drive: si ya hay un Excel o carpetas de clientes allí, bórrelos usted antes de volver a subir las facturas, o se anotarán dos veces. No se puede deshacer.</p>
       <label for="password_leido">Escriba su contraseña para confirmar</label>
       <input id="password_leido" type="password" name="password" autocomplete="current-password" required>
       <button class="btn" type="submit" style="margin-top:12px;">Borrar lo leído</button>
