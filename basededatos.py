@@ -407,6 +407,17 @@ def establecer_password(tenant_id, password_en_claro):
         session.close()
 
 
+def establecer_password_hash(tenant_id, password_hash):
+    """Guarda una contraseña ya cifrada (la del registro, que espera la verificación del correo)."""
+    session = _obtener_session()
+    try:
+        g = session.get(Gestoria, tenant_id)
+        g.password_hash = password_hash
+        session.commit()
+    finally:
+        session.close()
+
+
 def verificar_login(email, password_en_claro):
     """Devuelve tenant_id si el email+contraseña son correctos, None si no."""
     session = _obtener_session()

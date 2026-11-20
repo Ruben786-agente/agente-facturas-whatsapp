@@ -10,6 +10,9 @@ import logging
 import os
 import re
 import secrets
+import time
+import hashlib
+import hmac
 from urllib.parse import urlencode, urlparse
 
 import requests
@@ -18,7 +21,7 @@ from flask import Blueprint, redirect, render_template_string, request, session,
 import autenticacion_google as google
 import autenticacion_onedrive as microsoft
 from almacenamiento import obtener_almacenamiento
-from basededatos import (PROGRAMAS, PROGRAMA_LISTO, PROGRAMAS_LISTOS, crear_gestoria_prueba, guardar_programa, obtener_programa, establecer_password, existe_email_gestoria,
+from basededatos import (PROGRAMAS, PROGRAMA_LISTO, PROGRAMAS_LISTOS, crear_gestoria_prueba, guardar_programa, obtener_programa, establecer_password, establecer_password_hash, existe_email_gestoria,
                          guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial,
                          eliminar_gestoria, email_de_gestoria, obtener_suscripcion_stripe, verificar_login,
                          obtener_periodicidad, guardar_periodicidad, obtener_resumen_diario, guardar_resumen_diario)
@@ -84,6 +87,20 @@ PLANTILLA_REGISTRO = acceso("Crear cuenta", """
     <button class="btn principal grande" type="submit">Crear cuenta</button>
   </form>
   <p class="pie"><a href="{{ url_for('panel.login') }}">Ya tengo cuenta</a></p>
+""")
+
+PLANTILLA_VERIFICAR = acceso("Confirme su correo", """
+  <h2>Confirme su correo</h2>
+  <p class="tenue">Hemos enviado un código de 6 cifras a <strong>{{ email }}</strong>. Escríbalo aquí para crear la cuenta. Caduca en 15 minutos. Si no lo ve, mire en spam.</p>
+  <form method="post">
+    <label for="codigo">Código</label>
+    <input id="codigo" name="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required autofocus style="letter-spacing:6px;font-size:22px;">
+    {% if error %}<p class="error-texto" role="alert">{{ error }}</p>{% endif %}
+    {% if info %}<p class="tenue" role="status">{{ info }}</p>{% endif %}
+    <button class="btn principal grande" type="submit">Crear cuenta</button>
+  </form>
+  <form method="post" action="{{ url_for('alta.reenviar_codigo') }}" style="margin-top:10px;"><button class="btn" type="submit">Reenviar el código</button></form>
+  <p class="pie"><a href="{{ url_for('alta.registro') }}">Cambiar el email</a></p>
 """)
 
 CSS_CONEXIONES = """
@@ -274,12 +291,79 @@ def registro():
             error = "Ya existe una cuenta con ese email."
         if error:
             return render_template_string(PLANTILLA_REGISTRO, error=error, programas=PROGRAMAS, programa_elegido=programa)
-        tenant_id = crear_gestoria_prueba(nombre, email, programa=programa)
-        establecer_password(tenant_id, password)
-        session.clear()
-        session["tenant_id"] = tenant_id
-        return redirect(url_for("alta.conexiones"))
+        from werkzeug.security import generate_password_hash
+        session.pop("registro_pendiente", None)
+        session["registro_pendiente"] = {"nombre": nombre, "email": email, "programa": programa,
+                                         "password_hash": generate_password_hash(password), "intentos": 0, "ultimo_envio": 0}
+        if not _enviar_codigo():
+            # Si el correo no puede enviarse (servicio caído o sin configurar) no dejamos a nadie fuera: se crea la cuenta como antes.
+            log.warning("No se pudo enviar el código de verificación; se crea la cuenta sin verificar")
+            return _crear_cuenta_pendiente()
+        return redirect(url_for("alta.verificar_correo"))
     return render_template_string(PLANTILLA_REGISTRO, error=None, programas=PROGRAMAS, programa_elegido=PROGRAMA_LISTO)
+
+
+def _hash_codigo(codigo, email):
+    clave = (os.environ.get("SECRET_KEY") or os.environ.get("FLASK_SECRET_KEY") or "agente").encode()
+    return hmac.new(clave, f"{email}:{codigo}".encode(), hashlib.sha256).hexdigest()
+
+
+def _enviar_codigo():
+    """Genera un código de 6 cifras, lo guarda (cifrado) en la sesión y lo manda al correo. True si Resend lo aceptó."""
+    from notificaciones import enviar_correo
+    pend = session.get("registro_pendiente")
+    if not pend:
+        return False
+    codigo = f"{secrets.randbelow(1000000):06d}"
+    pend.update(codigo_hash=_hash_codigo(codigo, pend["email"]), caduca=time.time() + 900, ultimo_envio=time.time())
+    session["registro_pendiente"] = pend
+    return enviar_correo(pend["email"], "Su código de verificación", "Confirme su correo",
+                         [f"Su código es: {codigo}", "Caduca en 15 minutos. Si no ha pedido crear una cuenta, ignore este mensaje."])
+
+
+def _crear_cuenta_pendiente():
+    pend = session.pop("registro_pendiente", None)
+    if not pend or existe_email_gestoria(pend["email"]):
+        return redirect(url_for("alta.registro"))
+    tenant_id = crear_gestoria_prueba(pend["nombre"], pend["email"], programa=pend["programa"])
+    establecer_password_hash(tenant_id, pend["password_hash"])
+    session.clear()
+    session["tenant_id"] = tenant_id
+    return redirect(url_for("alta.conexiones"))
+
+
+@bp_alta.route("/registro/verificar", methods=["GET", "POST"])
+def verificar_correo():
+    pend = session.get("registro_pendiente")
+    if not pend or not pend.get("codigo_hash"):
+        return redirect(url_for("alta.registro"))
+    error = None
+    if request.method == "POST":
+        codigo = re.sub(r"\D", "", request.form.get("codigo", ""))
+        if time.time() > pend.get("caduca", 0):
+            error = "El código ha caducado. Pulse «Reenviar el código»."
+        elif pend.get("intentos", 0) >= 5:
+            error = "Demasiados intentos. Pulse «Reenviar el código» para recibir uno nuevo."
+        elif not hmac.compare_digest(_hash_codigo(codigo, pend["email"]), pend["codigo_hash"]):
+            pend["intentos"] = pend.get("intentos", 0) + 1
+            session["registro_pendiente"] = pend
+            error = "Código incorrecto."
+        else:
+            return _crear_cuenta_pendiente()
+    return render_template_string(PLANTILLA_VERIFICAR, email=pend["email"], error=error, info=request.args.get("info"))
+
+
+@bp_alta.route("/registro/reenviar", methods=["POST"])
+def reenviar_codigo():
+    pend = session.get("registro_pendiente")
+    if not pend:
+        return redirect(url_for("alta.registro"))
+    if time.time() - pend.get("ultimo_envio", 0) < 60:
+        return redirect(url_for("alta.verificar_correo", info="Espere un minuto antes de pedir otro código."))
+    pend["intentos"] = 0
+    session["registro_pendiente"] = pend
+    _enviar_codigo()
+    return redirect(url_for("alta.verificar_correo", info="Código reenviado."))
 
 
 @bp_alta.route("/conexiones")
