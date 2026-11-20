@@ -93,17 +93,25 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
       <strong class="solo-raton">Arrastre los archivos aquí</strong><strong class="solo-tactil">Suba sus facturas desde el móvil</strong>
       <p class="solo-raton">PDF, fotos (JPG, PNG, HEIC...), ZIP o factura electrónica (XML). Hasta 25 MB cada uno. También puede arrastrar una carpeta entera.</p>
       <div style="margin-top:18px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
-        <label class="btn principal grande solo-tactil" for="camara">📷 Hacer foto de una factura</label>
+        <button type="button" id="abrir-camara" class="btn principal grande solo-tactil">📷 Hacer fotos de facturas</button>
         <label class="btn principal grande solo-raton" for="archivos">Elegir archivos</label>
         <label class="btn grande solo-tactil" for="archivos">Elegir de la galería o archivos</label>
         <label class="btn grande solo-raton" for="carpeta">Subir una carpeta entera</label>
       </div>
-      <p class="tenue solo-tactil" style="margin:14px 0 0;font-size:14px;">Para una buena lectura: con buena luz, la factura entera y plana, sin sombras ni dedos. Una foto por factura; puede hacer otra justo después.</p>
+      <p class="tenue solo-tactil" style="margin:14px 0 0;font-size:14px;">Para una buena lectura: con buena luz, la factura entera y plana, sin sombras ni dedos. Una foto por factura: pulse el disparador tantas veces como facturas tenga.</p>
     </div>
     <input id="archivos" class="oculto" type="file" multiple accept="{{ aceptar }}">
     <input id="camara" class="oculto" type="file" accept="image/*" capture="environment">
     <input id="carpeta" class="oculto" type="file" webkitdirectory multiple>
   </form>
+  <div id="capa-camara" hidden style="position:fixed;inset:0;z-index:50;background:#000;display:none;flex-direction:column;">
+    <video id="video-camara" playsinline muted autoplay style="flex:1;min-height:0;width:100%;object-fit:cover;"></video>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px calc(14px + env(safe-area-inset-bottom));background:#000;color:#fff;gap:12px;">
+      <span id="contador-camara" style="min-width:90px;font-size:15px;">0 fotos</span>
+      <button type="button" id="disparador" aria-label="Hacer foto" style="width:68px;height:68px;border-radius:50%;border:4px solid #fff;background:#ffffff33;"></button>
+      <button type="button" id="cerrar-camara" class="btn" style="min-width:90px;">Listo</button>
+    </div>
+  </div>
   <ul class="lista" id="lista" aria-live="polite"></ul>
   <p class="tenue" id="resumen" style="margin-top:16px;"></p>
   <p style="margin-top:8px;"><button type="button" id="limpiar" class="btn discreto" hidden>Quitar de la lista las terminadas</button></p>
@@ -112,7 +120,7 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
     var zona = document.getElementById('zona'), entrada = document.getElementById('archivos');
     var lista = document.getElementById('lista'), resumen = document.getElementById('resumen');
     var token = (document.querySelector('input[name=csrf_token]') || {}).value || '';
-    var MAX = 25 * 1024 * 1024, cola = [], locales = [], remotos = [], activos = 0, PARALELO = 3, omitidos = 0, temporizador = null;
+    var MAX = 25 * 1024 * 1024, cola = [], locales = [], remotos = [], activos = 0, PARALELO = 5, omitidos = 0, temporizador = null;
     var VALIDAS = '{{ aceptar }}'.split(',');
     function valida(nombre) { var i = nombre.lastIndexOf('.'); return i > 0 && VALIDAS.indexOf(nombre.slice(i).toLowerCase()) >= 0; }
     ['dragenter', 'dragover'].forEach(function (n) { zona.addEventListener(n, function (e) { e.preventDefault(); zona.classList.add('encima'); }); });
@@ -141,6 +149,39 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
       });
       anadir(nuevas); camara.value = '';
     });
+    // Cámara continua: se abre una vez y cada disparo sube una foto en segundo plano.
+    var capa = document.getElementById('capa-camara'), video = document.getElementById('video-camara'), flujo = null, hechas = 0;
+    function cerrarCamara() {
+      if (flujo) { flujo.getTracks().forEach(function (t) { t.stop(); }); flujo = null; }
+      capa.style.display = 'none'; capa.hidden = true; video.srcObject = null;
+    }
+    document.getElementById('abrir-camara').addEventListener('click', function () {
+      if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { camara.click(); return; }
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1920 } }, audio: false })
+        .then(function (f) {
+          flujo = f; video.srcObject = f; hechas = 0; document.getElementById('contador-camara').textContent = '0 fotos';
+          capa.hidden = false; capa.style.display = 'flex';
+        })
+        .catch(function () { camara.click(); });   // sin permiso o sin soporte: cámara normal del móvil
+    });
+    document.getElementById('cerrar-camara').addEventListener('click', cerrarCamara);
+    document.getElementById('disparador').addEventListener('click', function () {
+      if (!flujo || !video.videoWidth) { return; }
+      var lienzo = document.createElement('canvas'), ancho = video.videoWidth, alto = video.videoHeight, escala = Math.min(1, 2400 / Math.max(ancho, alto));
+      lienzo.width = Math.round(ancho * escala); lienzo.height = Math.round(alto * escala);
+      lienzo.getContext('2d').drawImage(video, 0, 0, lienzo.width, lienzo.height);
+      lienzo.toBlob(function (b) {
+        if (!b) { return; }
+        var d = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+        fotos++; hechas++;
+        var nombre = 'foto_' + d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds()) + '_' + fotos + '.jpg';
+        var f; try { f = new File([b], nombre, { type: 'image/jpeg' }); } catch (e) { b.name = nombre; f = b; }
+        anadir([f]);
+        document.getElementById('contador-camara').textContent = hechas + (hechas === 1 ? ' foto' : ' fotos');
+        if (navigator.vibrate) { navigator.vibrate(30); }
+      }, 'image/jpeg', 0.88);
+    });
+
 
     // Arrastrar carpetas: se recorren (con sus subcarpetas) y se suben los archivos que sirven.
     function recoger(entradas) {
