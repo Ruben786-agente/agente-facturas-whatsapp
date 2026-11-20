@@ -72,6 +72,12 @@ REGLAS:
 6. Retención de IRPF o recargo de equivalencia: solo si aparecen impresos; si no, null.
 7. emisor es quien emite la factura (proveedor); destinatario es el cliente. Distínguelos con
    cuidado: de ello depende a qué empresa se asigna el documento.
+   Academias, centros de formación y negocios similares: el nombre y NIF que aparecen en la cabecera del documento
+   (arriba, junto a la dirección y los datos de contacto del negocio) son del EMISOR. El cliente es quien figura en
+   la columna «ALUMNO», «ALUMN@», «CLIENTE» o similar de la tabla de conceptos: ponlo como destinatario.nombre
+   tal como está escrito, aunque sea solo un nombre de pila (no inventes apellidos ni NIF). Si la columna es de
+   «ASISTENTES» (talleres en grupo) o no hay nombre de cliente, deja destinatario.nombre vacío. NUNCA copies en
+   destinatario el nombre ni el NIF del emisor.
 8. total_factura: el total impreso en el documento, no recalculado.
 9. es_factura_simplificada: true si pone "factura simplificada" o equivalente.
    sin_cif_destinatario: true si en ningún sitio aparece el NIF/CIF del comprador.

@@ -77,6 +77,15 @@ def _escribe_hoja(ws, cif_empresa, nombre_empresa, periodo, filas):
         ws.column_dimensions[letra].width = ancho
 
 
+def _mismo_nombre(a, b):
+    import re, unicodedata
+    def n(x):
+        x = unicodedata.normalize("NFKD", (x or "").upper())
+        return " ".join(re.sub(r"[^A-Z0-9 ]", " ", "".join(c for c in x if not unicodedata.combining(c))).split())
+    a, b = n(a), n(b)
+    return bool(a) and a == b
+
+
 def _procesa_una_factura(factura, cif_empresa):
     if factura.get("_motivo_revision"):   # el motivo concreto (p. ej. «las dos lecturas no coinciden en: total») va antes que el genérico
         return None, factura["_motivo_revision"]
@@ -95,6 +104,9 @@ def _procesa_una_factura(factura, cif_empresa):
         return None, problemas[0]
 
     contraparte = factura["emisor"] if tipo == "COMPRAS" else factura["destinatario"]
+    if tipo == "VENTAS" and _mismo_nombre(contraparte.get("nombre"), factura["emisor"].get("nombre")):
+        # El cliente no puede ser el propio emisor: es un error de lectura (se ha copiado la cabecera). Mejor vacío que un nombre falso.
+        contraparte = {**contraparte, "nombre": ""}
     concepto = _concepto(factura["num_factura"], contraparte.get("nombre", ""))
 
     def _r(v):
