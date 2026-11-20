@@ -86,7 +86,7 @@ def _mismo_nombre(a, b):
     return bool(a) and a == b
 
 
-def _procesa_una_factura(factura, cif_empresa):
+def _procesa_una_factura(factura, cif_empresa, nombre_empresa=""):
     if factura.get("_motivo_revision"):   # el motivo concreto (p. ej. «las dos lecturas no coinciden en: total») va antes que el genérico
         return None, factura["_motivo_revision"]
     if factura.get("confianza") == "baja":
@@ -104,7 +104,8 @@ def _procesa_una_factura(factura, cif_empresa):
         return None, problemas[0]
 
     contraparte = factura["emisor"] if tipo == "COMPRAS" else factura["destinatario"]
-    if tipo == "VENTAS" and _mismo_nombre(contraparte.get("nombre"), factura["emisor"].get("nombre")):
+    if tipo == "VENTAS" and (_mismo_nombre(contraparte.get("nombre"), factura["emisor"].get("nombre"))
+                             or _mismo_nombre(contraparte.get("nombre"), nombre_empresa)):
         # El cliente no puede ser el propio emisor: es un error de lectura (se ha copiado la cabecera). Mejor vacío que un nombre falso.
         contraparte = {**contraparte, "nombre": ""}
     concepto = _concepto(factura["num_factura"], contraparte.get("nombre", ""))
@@ -131,7 +132,7 @@ def _procesa_una_factura(factura, cif_empresa):
 def generar_excel_mieos(cif_empresa, nombre_empresa, periodo, facturas, ruta_salida):
     filas_compras, filas_ventas, revision = [], [], []
     for factura in facturas:
-        tipo, resultado = _procesa_una_factura(factura, cif_empresa)
+        tipo, resultado = _procesa_una_factura(factura, cif_empresa, nombre_empresa)
         if tipo is None:
             revision.append({"factura": factura, "motivo": resultado})
             continue
@@ -147,7 +148,7 @@ def generar_excel_mieos(cif_empresa, nombre_empresa, periodo, facturas, ruta_sal
 
 
 def anadir_factura_a_excel(contenido_existente, cif_empresa, nombre_empresa, periodo, factura):
-    tipo, resultado = _procesa_una_factura(factura, cif_empresa)
+    tipo, resultado = _procesa_una_factura(factura, cif_empresa, nombre_empresa)
     if tipo is None:
         return contenido_existente, {"ok": False, "motivo": resultado}
     filas_nuevas = resultado
