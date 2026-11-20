@@ -33,6 +33,8 @@ CSS_SUBIDA = """
 <style>
   .zona { margin-top: 24px; border: 2px dashed var(--linea-fuerte); border-radius: 12px; background: var(--superficie);
           padding: 40px 24px; text-align: center; transition: border-color .15s, background .15s; }
+  .solo-tactil { display: none; }
+  @media (hover: none) and (pointer: coarse) { .solo-tactil { display: inline-flex; } p.solo-tactil, strong.solo-tactil { display: block; } .solo-raton { display: none !important; } }
   .oculto { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
   .zona.encima { border-color: var(--marca); background: var(--marca-clara); outline: none; }
   .zona strong { display: block; font-size: 20px; margin-bottom: 6px; }
@@ -88,14 +90,18 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
   {% else %}
   <form id="formulario" method="post" onsubmit="return false;">
     <div class="zona" id="zona">
-      <strong>Arrastre los archivos aquí</strong>
-      <p>PDF, fotos (JPG, PNG, HEIC...), ZIP o factura electrónica (XML). Hasta 25 MB cada uno. También puede arrastrar una carpeta entera.</p>
+      <strong class="solo-raton">Arrastre los archivos aquí</strong><strong class="solo-tactil">Suba sus facturas desde el móvil</strong>
+      <p class="solo-raton">PDF, fotos (JPG, PNG, HEIC...), ZIP o factura electrónica (XML). Hasta 25 MB cada uno. También puede arrastrar una carpeta entera.</p>
       <div style="margin-top:18px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
-        <label class="btn principal grande" for="archivos">Elegir archivos</label>
-        <label class="btn grande" for="carpeta">Subir una carpeta entera</label>
+        <label class="btn principal grande solo-tactil" for="camara">📷 Hacer foto de una factura</label>
+        <label class="btn principal grande solo-raton" for="archivos">Elegir archivos</label>
+        <label class="btn grande solo-tactil" for="archivos">Elegir de la galería o archivos</label>
+        <label class="btn grande solo-raton" for="carpeta">Subir una carpeta entera</label>
       </div>
+      <p class="tenue solo-tactil" style="margin:14px 0 0;font-size:14px;">Para una buena lectura: con buena luz, la factura entera y plana, sin sombras ni dedos. Una foto por factura; puede hacer otra justo después.</p>
     </div>
     <input id="archivos" class="oculto" type="file" multiple accept="{{ aceptar }}">
+    <input id="camara" class="oculto" type="file" accept="image/*" capture="environment">
     <input id="carpeta" class="oculto" type="file" webkitdirectory multiple>
   </form>
   <ul class="lista" id="lista" aria-live="polite"></ul>
@@ -122,6 +128,19 @@ PLANTILLA_SUBIR = pagina("Subir facturas", """
     });
     entrada.addEventListener('change', function () { anadir(entrada.files); entrada.value = ''; });
     carpeta.addEventListener('change', function () { anadir(carpeta.files); carpeta.value = ''; });
+    var camara = document.getElementById('camara');
+    var fotos = 0;
+    camara.addEventListener('change', function () {
+      // La cámara llama «image.jpg» a todas las fotos: se les da un nombre único para que no se pisen.
+      var nuevas = [], d = new Date(), p2 = function (n) { return (n < 10 ? '0' : '') + n; };
+      var sello = d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '_' + p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
+      Array.prototype.forEach.call(camara.files, function (f) {
+        var i = f.name.lastIndexOf('.'), ext = i > 0 ? f.name.slice(i).toLowerCase() : '.jpg';
+        fotos++;
+        try { nuevas.push(new File([f], 'foto_' + sello + '_' + fotos + ext, { type: f.type })); } catch (e) { nuevas.push(f); }
+      });
+      anadir(nuevas); camara.value = '';
+    });
 
     // Arrastrar carpetas: se recorren (con sus subcarpetas) y se suben los archivos que sirven.
     function recoger(entradas) {
