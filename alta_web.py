@@ -21,7 +21,7 @@ from flask import Blueprint, redirect, render_template_string, request, session,
 import autenticacion_google as google
 import autenticacion_onedrive as microsoft
 from almacenamiento import obtener_almacenamiento
-from basededatos import (PROGRAMAS, PROGRAMA_LISTO, PROGRAMAS_LISTOS, crear_gestoria_prueba, guardar_programa, obtener_programa, establecer_password, establecer_password_hash, existe_email_gestoria,
+from basededatos import (PROGRAMAS, PROGRAMA_LISTO, PROGRAMAS_LISTOS, crear_gestoria_prueba, guardar_programa, obtener_programa, establecer_password, establecer_password_hash, borrar_lo_leido, existe_email_gestoria,
                          guardar_credencial, guardar_estado_correo, obtener_estado_conexiones, eliminar_credencial,
                          eliminar_gestoria, email_de_gestoria, obtener_suscripcion_stripe, verificar_login,
                          obtener_periodicidad, guardar_periodicidad, obtener_resumen_diario, guardar_resumen_diario)
@@ -247,6 +247,16 @@ PLANTILLA_CONEXIONES = pagina("Conexiones", """
   {% endif %}
 
   <p style="margin-top:28px;"><a class="btn" href="{{ url_for('panel.panel') }}">Ir al panel</a></p>
+
+  <details style="margin-top:36px;max-width:640px;">
+    <summary class="tenue" style="cursor:pointer;">Borrar lo leído y empezar de cero</summary>
+    <form method="post" action="{{ url_for('alta.borrar_leido') }}" style="margin-top:14px;">
+      <p class="tenue">Se borran las facturas leídas, los clientes dados de alta, los avisos y lo pendiente de revisar. <strong>Se mantienen su cuenta, sus conexiones y su carpeta de entrada.</strong> No se tocan sus archivos de OneDrive o Google Drive: si ya hay un Excel o carpetas de clientes allí, bórrelos usted antes de volver a subir las facturas, o se anotarán dos veces. No se puede deshacer.</p>
+      <label for="password_leido">Escriba su contraseña para confirmar</label>
+      <input id="password_leido" type="password" name="password" autocomplete="current-password" required>
+      <button class="btn" type="submit" style="margin-top:12px;">Borrar lo leído</button>
+    </form>
+  </details>
 
   <details style="margin-top:36px;max-width:640px;">
     <summary class="tenue" style="cursor:pointer;">Eliminar mi cuenta y mis datos</summary>
@@ -577,6 +587,17 @@ def desconectar(proveedor):
         google.revocar_token(token)
     log.info("Gestoría %s desconectó %s", session["tenant_id"], proveedor)
     return redirect(url_for("alta.conexiones", ok=f"{_NOMBRES[proveedor]} desconectado."))
+
+
+@bp_alta.route("/cuenta/borrar-leido", methods=["POST"])
+@login_requerido
+def borrar_leido():
+    tenant_id = session["tenant_id"]
+    if not verificar_login(email_de_gestoria(tenant_id) or "", request.form.get("password", "")):
+        return redirect(url_for("alta.conexiones", error="La contraseña no es correcta. No se ha borrado nada."))
+    borrar_lo_leido(tenant_id)
+    log.info("Gestoría %s borró lo leído", tenant_id)
+    return redirect(url_for("panel.panel"))
 
 
 @bp_alta.route("/cuenta/eliminar", methods=["POST"])
