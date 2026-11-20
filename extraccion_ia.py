@@ -72,12 +72,6 @@ REGLAS:
 6. Retención de IRPF o recargo de equivalencia: solo si aparecen impresos; si no, null.
 7. emisor es quien emite la factura (proveedor); destinatario es el cliente. Distínguelos con
    cuidado: de ello depende a qué empresa se asigna el documento.
-   Academias, centros de formación y negocios similares: el nombre y NIF que aparecen en la cabecera del documento
-   (arriba, junto a la dirección y los datos de contacto del negocio) son del EMISOR. El cliente es quien figura en
-   la columna «ALUMNO», «ALUMN@», «CLIENTE» o similar de la tabla de conceptos: ponlo como destinatario.nombre
-   tal como está escrito, aunque sea solo un nombre de pila (no inventes apellidos ni NIF). Si la columna es de
-   «ASISTENTES» (talleres en grupo) o no hay nombre de cliente, deja destinatario.nombre vacío. NUNCA copies en
-   destinatario el nombre ni el NIF del emisor.
 8. total_factura: el total impreso en el documento, no recalculado.
 9. es_factura_simplificada: true si pone "factura simplificada" o equivalente.
    sin_cif_destinatario: true si en ningún sitio aparece el NIF/CIF del comprador.
@@ -145,12 +139,12 @@ def _respuesta_por_defecto(motivo: str, servicio: bool = False) -> dict:
     }
 
 
-def _llamar_api(bloque, modelo=None):
+def _llamar_api(bloque, modelo=None, complemento=""):
     """Una llamada a la IA. Devuelve (texto, stop_reason)."""
     modelo = modelo or MODELO
     cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     respuesta = cliente.messages.create(
-        model=modelo, max_tokens=4000, system=PROMPT,
+        model=modelo, max_tokens=4000, system=PROMPT + complemento,
         messages=[{"role": "user", "content": [
             bloque, {"type": "text", "text": "Extrae los datos de este documento según las instrucciones."},
         ]}],
@@ -163,7 +157,7 @@ def _llamar_api(bloque, modelo=None):
     return "".join(b.text for b in respuesta.content if b.type == "text"), respuesta.stop_reason
 
 
-def _leer(contenido: bytes, modelo=None) -> dict:
+def _leer(contenido: bytes, modelo=None, complemento="") -> dict:
     media_type = _detectar_media_type(contenido)
     datos_b64 = base64.b64encode(contenido).decode()
     if media_type == "application/pdf":
@@ -172,7 +166,7 @@ def _leer(contenido: bytes, modelo=None) -> dict:
         bloque = {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": datos_b64}}
 
     try:
-        texto, motivo_parada = _llamar_api(bloque, modelo)
+        texto, motivo_parada = _llamar_api(bloque, modelo, complemento)
         if motivo_parada == "max_tokens":
             log.warning("La respuesta de la IA se cortó por longitud")
         try:
@@ -368,7 +362,56 @@ def _sigue_dudosa(r: dict) -> bool:
     return r.get("confianza") == "baja" or bool(problemas_factura(r)) or not _cuadra(r)
 
 
+# Solo se usa en la relectura del cliente (ver _completar_cliente), nunca en la lectura normal.
+COMPLEMENTO_CLIENTE = """
+
+INSTRUCCIÓN ADICIONAL PARA ESTA LECTURA: el nombre y NIF de la cabecera del documento (arriba, junto a la dirección y los
+datos de contacto del negocio) son del EMISOR. El cliente es quien figura en la columna «ALUMNO», «ALUMN@», «CLIENTE» o
+similar de la tabla de conceptos: ponlo en destinatario.nombre tal como está escrito, aunque sea solo un nombre de pila
+(no inventes apellidos ni NIF). Si la columna es de «ASISTENTES» o no hay nombre de cliente, deja destinatario.nombre vacío.
+NUNCA copies en destinatario el nombre ni el NIF del emisor."""
+
+
+def _norm_nombre(x):
+    import re, unicodedata
+    x = unicodedata.normalize("NFKD", (x or "").upper())
+    return " ".join(re.sub(r"[^A-Z0-9 ]", " ", "".join(c for c in x if not unicodedata.combining(c))).split())
+
+
+def _cliente_dudoso(r: dict) -> bool:
+    """Factura normal (no ticket) cuyo cliente sale vacío o con el mismo nombre que el emisor: señal de que se ha leído mal la cabecera."""
+    if r.get("_lectura_fallida") or r.get("es_documento_fiscal") is False:
+        return False
+    if r.get("es_factura_simplificada") or r.get("formato_ticket_tpv"):
+        return False
+    emisor = _norm_nombre((r.get("emisor") or {}).get("nombre"))
+    cliente = _norm_nombre((r.get("destinatario") or {}).get("nombre"))
+    return bool(emisor) and (cliente == "" or cliente == emisor)
+
+
+def _completar_cliente(contenido: bytes, resultado: dict) -> dict:
+    """Solo si el cliente sale vacío o igual que el emisor: una lectura más con la instrucción adicional. De ella se toma ÚNICAMENTE
+    el nombre del cliente; número, fecha, importes y CIF siguen siendo los de la primera lectura. Si algo falla, no cambia nada."""
+    if not _cliente_dudoso(resultado):
+        return resultado
+    try:
+        otra = _leer(contenido, None, COMPLEMENTO_CLIENTE)
+        nombre = ((otra.get("destinatario") or {}).get("nombre") or "").strip()
+        if (otra.get("_lectura_fallida") or not nombre or _norm_nombre(nombre) == _norm_nombre((resultado.get("emisor") or {}).get("nombre"))
+                or (otra.get("num_factura") or "").strip().upper() != (resultado.get("num_factura") or "").strip().upper()):
+            return resultado
+        log.info("Cliente completado con una lectura adicional")
+        return {**resultado, "destinatario": {**(resultado.get("destinatario") or {}), "nombre": nombre}}
+    except Exception:
+        log.debug("No se pudo completar el nombre del cliente")
+        return resultado
+
+
 def extraer_factura(contenido: bytes) -> dict:
+    return _completar_cliente(contenido, _extraer_factura_con_refuerzo(contenido))
+
+
+def _extraer_factura_con_refuerzo(contenido: bytes) -> dict:
     """Lectura normal y, si MODELO_ESCALADO está definido y la factura sigue dudosa, una última lectura con ese modelo (más potente)."""
     resultado = _extraer_factura_base(contenido)
     if MODELO_ESCALADO and _sigue_dudosa(resultado):
