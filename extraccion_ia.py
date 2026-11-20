@@ -431,8 +431,47 @@ def _completar_cif_emisor(contenido: bytes, r: dict) -> dict:
     return r
 
 
+def _nifs_del_pdf(contenido: bytes):
+    """Conjunto de NIF/CIF con forma válida que aparecen en el texto del PDF (primeras 3 páginas). None si no es un PDF con texto."""
+    import io, re
+    from pypdf import PdfReader
+    if _detectar_media_type(contenido) != "application/pdf":
+        return None
+    texto = " ".join((pg.extract_text() or "") for pg in PdfReader(io.BytesIO(contenido)).pages[:3])
+    return {m.upper() for m in re.findall(r"\b(?:[0-9]{8}[A-Za-z]|[XYZxyz][0-9]{7}[A-Za-z]|[ABCDEFGHJNPQRSUVWabcdefghjnpqrsuvw][0-9]{7}[0-9A-Ja-j])\b", texto)}
+
+
+def _corregir_emisor_releyendo(contenido: bytes, r: dict) -> dict:
+    """Caso muy concreto: factura normal sin CIF de emisor, con CIF de comprador, y el PDF tiene UN solo NIF que es justo el del comprador
+    (el NIF de la cabecera se ha leído como si fuera del cliente). Se relee con COMPLEMENTO_CLIENTE y se acepta solo si la nueva lectura
+    pone ese NIF como emisor, coincide en nº de factura y cambia el comprador por otro nombre distinto. Si no, no cambia nada."""
+    try:
+        if r.get("_lectura_fallida") or r.get("es_documento_fiscal") is False or r.get("es_factura_simplificada") or r.get("formato_ticket_tpv"):
+            return r
+        em, de = r.get("emisor") or {}, r.get("destinatario") or {}
+        cif_de = (de.get("cif_nif") or "").strip().upper().replace("-", "").replace(" ", "")
+        if (em.get("cif_nif") or "").strip() or not cif_de:
+            return r
+        nifs = _nifs_del_pdf(contenido)
+        if not nifs or nifs != {cif_de}:
+            return r
+        otra = _leer(contenido, None, COMPLEMENTO_CLIENTE)
+        em2, de2 = otra.get("emisor") or {}, otra.get("destinatario") or {}
+        cif_em2 = (em2.get("cif_nif") or "").strip().upper().replace("-", "").replace(" ", "")
+        nombre2 = (de2.get("nombre") or "").strip()
+        if (otra.get("_lectura_fallida") or cif_em2 != cif_de or not nombre2 or _norm_nombre(nombre2) == _norm_nombre(de.get("nombre"))
+                or (otra.get("num_factura") or "").strip().upper() != (r.get("num_factura") or "").strip().upper()):
+            return r
+        log.info("Emisor y cliente corregidos con una lectura adicional")
+        return {**r, "emisor": {**em, "cif_nif": cif_em2}, "destinatario": {**de, "nombre": nombre2, "cif_nif": (de2.get("cif_nif") or "").strip()}}
+    except Exception:
+        log.debug("No se pudo corregir el emisor releyendo")
+        return r
+
+
 def extraer_factura(contenido: bytes) -> dict:
-    return _completar_cliente(contenido, _completar_cif_emisor(contenido, _extraer_factura_con_refuerzo(contenido)))
+    base = _completar_cif_emisor(contenido, _extraer_factura_con_refuerzo(contenido))
+    return _completar_cliente(contenido, _corregir_emisor_releyendo(contenido, base))
 
 
 def _extraer_factura_con_refuerzo(contenido: bytes) -> dict:
