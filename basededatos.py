@@ -26,7 +26,7 @@ def _uuid_column(**kwargs):
 
 # Programas contables que ofrece el selector del registro. Hoy solo miEOS tiene formato probado.
 PROGRAMAS = [("mieos", "miEOS"), ("sage", "Sage Despachos / otro Sage"), ("sage50", "Sage 50"), ("contasol", "ContaSOL"), ("a3", "A3"),
-             ("glasof", "Glasof"), ("holded", "Holded"), ("otro", "Otro")]
+             ("glasof", "Glasof"), ("ncs", "NCS (NCS Scan / Contabilidad / Director)"), ("holded", "Holded"), ("otro", "Otro")]
 PROGRAMA_LISTO = "mieos"
 # Programas con exportador (miEOS de serie; ContaSOL y Sage 50 se generan a partir del Excel de miEOS, ver exportadores.py)
 PROGRAMAS_LISTOS = ("mieos", "contasol", "sage50", "holded")

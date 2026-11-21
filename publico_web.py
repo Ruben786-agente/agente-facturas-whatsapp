@@ -262,7 +262,7 @@ _CUERPO_INICIO = """
   <h1>Las facturas llegan o las sube usted. El Excel ya está hecho.</h1>
   <p class="sub">El agente lee cada factura que llega a su correo o que usted sube al panel, la anota en un Excel con el formato de su programa contable y la archiva en la carpeta de cada cliente.</p>
   <div class="progs-hero">
-    <span class="ph ok">miEos</span><span class="ph ok">Holded</span><span class="ph">ContaSOL <em>pruebas</em></span><span class="ph">Sage 50 <em>pruebas</em></span><span class="ph">a3, Glasof, Sage Despachos: a petición</span>
+    <span class="ph ok">miEos</span><span class="ph ok">Holded</span><span class="ph">ContaSOL <em>pruebas</em></span><span class="ph">Sage 50 <em>pruebas</em></span><span class="ph">a3, Glasof, NCS, Sage Despachos: a petición</span>
   </div>
   <div class="acciones-hero">
     {% if logueada %}<a class="btn principal" href="{{ url_for('panel.panel') }}">Ir al panel</a>
@@ -343,6 +343,7 @@ _CUERPO_INICIO = """
     <span class="prog">Sage Despachos &middot; en preparaci&oacute;n</span>
     <span class="prog">Glasof &middot; en preparaci&oacute;n</span>
     <span class="prog">a3 &middot; en preparaci&oacute;n</span>
+    <span class="prog">NCS &middot; en preparaci&oacute;n</span>
   </div>
   {% if d.email %}<p class="intro">&iquest;Prefiere consultarlo antes? Escr&iacute;banos a <a href="mailto:{{ d.email }}?subject=Mi%20programa%20contable">{{ d.email }}</a></p>{% endif %}
 </section>
@@ -381,7 +382,7 @@ _CUERPO_INICIO = """
   <h2>Preguntas frecuentes</h2>
   <details><summary>¿Qué necesito para empezar?</summary><p>Una cuenta de correo (Gmail u Outlook / Microsoft 365) y un almacenamiento (OneDrive o Google Drive). Si su Microsoft 365 es de empresa, puede que un administrador tenga que aprobar el permiso una sola vez; le damos un enlace para enviárselo.</p></details>
   <details><summary>¿Y si la IA se equivoca?</summary><p>Lo que no está claro no se anota en el Excel: va a Revisión con el motivo, y usted lo corrige o lo da por revisado desde el panel. El agente es una ayuda y no sustituye su revisión profesional: usted siempre tiene la última palabra.</p></details>
-  <details><summary>¿Con qué programas contables funciona?</summary><p>Genera el Excel en formato miEos, y también en Holded (facturas recibidas) y, en pruebas, en ContaSOL y Sage 50. Preparamos Sage Despachos, Glasof y a3 a petición: dígalo al registrarse y le pediremos un fichero de ejemplo con datos ficticios. Si usa otro programa, cuéntenoslo y lo valoramos. No anunciamos un programa como disponible hasta haberlo probado.</p></details>
+  <details><summary>¿Con qué programas contables funciona?</summary><p>Genera el Excel en formato miEos, y también en Holded (facturas recibidas) y, en pruebas, en ContaSOL y Sage 50. Preparamos Sage Despachos, Glasof, NCS y a3 a petición: dígalo al registrarse y le pediremos un fichero de ejemplo con datos ficticios. Si usa otro programa, cuéntenoslo y lo valoramos. No anunciamos un programa como disponible hasta haberlo probado.</p></details>
   <details><summary>¿Qué documentos lee?</summary><p>Facturas y tickets que lleguen como adjunto al correo, en PDF o imagen. Si el destinatario no se reconoce o falta el CIF, el documento se aparta para que usted lo identifique.</p></details>
   <details><summary>¿Dónde se guardan mis archivos?</summary><p>En su OneDrive o Google Drive, no en nuestros servidores. Nosotros solo guardamos los datos necesarios para que el panel funcione: qué facturas se han leído y su estado.</p></details>
   <details><summary>¿Puedo cancelar cuando quiera?</summary><p>Sí. No hay permanencia. Y si lo desea, puede borrar su cuenta y todos sus datos desde el propio panel.</p></details>
@@ -407,7 +408,7 @@ _BARRA_CTA = '''{% if not logueada %}
 
 PLANTILLA_INICIO = pagina("Las facturas de sus clientes, directas al Excel de su programa contable", CABECERA + _CUERPO_INICIO + _BARRA_CTA + PIE, barra=False, extra_head=_meta(
     "Agente Facturas para gestorías: las facturas de sus clientes, directas al Excel de su programa contable",
-    "El agente lee las facturas del correo de su gestoría y las deja en Excel para su programa contable (miEos y Holded; ContaSOL y Sage 50 en pruebas; a3, Glasof y otros a petición). 14 días gratis.",
+    "El agente lee las facturas del correo de su gestoría y las deja en Excel para su programa contable (miEos y Holded; ContaSOL y Sage 50 en pruebas; a3, Glasof, NCS y otros a petición). 14 días gratis.",
     "/", json_ld=_json_ld_inicio(_CUERPO_INICIO)))
 
 

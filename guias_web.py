@@ -18,7 +18,7 @@ bp_guias = Blueprint("guias", __name__)
 
 # Aviso común: transparencia sobre el estado de cada programa contable.
 NOTA_PROGRAMAS = ("El Excel sale en formato <strong>miEos</strong>. <strong>ContaSOL</strong> y "
-                  "<strong>Sage 50</strong> están disponibles en pruebas. Para a3, Glasof, Sage Despachos y otros, "
+                  "<strong>Sage 50</strong> están disponibles en pruebas. Para a3, Glasof, NCS, Sage Despachos y otros, "
                   "preparamos su formato a partir de un fichero de ejemplo con datos ficticios.")
 
 GUIAS = [
@@ -63,7 +63,7 @@ GUIAS = [
              "<ul><li><strong>miEos:</strong> disponible. El Excel se genera en su formato, con hojas de compras y ventas.</li>"
              "<li><strong>ContaSOL:</strong> en pruebas.</li>"
              "<li><strong>Sage 50:</strong> en pruebas.</li>"
-             "<li><strong>Sage Despachos, Glasof y a3:</strong> en preparación. No los anunciamos como disponibles hasta haberlos probado.</li></ul>"),
+             "<li><strong>Sage Despachos, Glasof, NCS y a3:</strong> en preparación. No los anunciamos como disponibles hasta haberlos probado.</li></ul>"),
             ("Qué contiene el fichero",
              "<p>Un archivo por cliente y periodo, con el desglose de IVA por tipo, recargo de equivalencia y retención de cada factura. Las facturas emitidas por el cliente y las recibidas se separan (compras y ventas).</p>"),
             ("Si usa otro programa",
@@ -75,7 +75,7 @@ GUIAS = [
             ("¿Funciona con ContaSOL y Sage 50?",
              "Están disponibles en pruebas: puede usarlos sabiendo que aún los estamos afinando con gestorías reales."),
             ("¿Qué programas están en preparación?",
-             "Sage Despachos, Glasof y a3. Para preparar su formato le pediremos un fichero de ejemplo con datos ficticios."),
+             "Sage Despachos, Glasof, NCS y a3. Para preparar su formato le pediremos un fichero de ejemplo con datos ficticios."),
         ],
     },
     {
